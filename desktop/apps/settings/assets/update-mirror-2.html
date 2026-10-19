@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="/desktop/assets/fonts/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="/desktop/assets/fonts/fonts.css">
+<style>
+:root {
+  --accent: #0a84ff;
+  --menu: rgba(26, 28, 34, 0.96);
+  --spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 400px;
+  overflow: hidden;
+  font-family: 'Poppins', sans-serif;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Material Symbols shortcut */
+.ms { 
+  font-family: 'Material Symbols Outlined'; font-weight: normal; font-style: normal; 
+  line-height: 1; display: inline-block; white-space: nowrap; direction: ltr; font-feature-settings: 'liga'; 
+}
+
+.card {
+  text-align: center;
+  padding: 40px 32px;
+  width: 100%;
+  max-width: 420px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Progress bar ── */
+.progress-track {
+  width: 200px;
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+  margin: 0 auto 8px auto;
+  overflow: hidden;
+  display: none;
+}
+
+.progress-track.visible { display: block; }
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #0a84ff, #0a84ff);
+  border-radius: 4px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px rgba(10,132,255,0.4);
+}
+
+.progress-fill.complete {
+  background: linear-gradient(90deg, #34c759, #30d158);
+  box-shadow: 0 0 12px rgba(52,199,89,0.5);
+}
+
+/* ── Button ── */
+.btn {
+  background: #0a84ff;
+  color: #fff;
+  border: none;
+  padding: 14px 32px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 14px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.25s ease;
+  display: none;
+  margin: 0 auto;
+  width: 100%;
+  box-shadow: 0 4px 20px rgba(10,132,255, 0.3);
+}
+
+.btn:hover {
+  background: #007aff;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(10,132,255, 0.4);
+}
+.btn:active { transform: scale(0.97); }
+
+.links {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.links a {
+  color: #0a84ff;
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+.links a:hover { text-decoration: underline; }
+
+body {
+  display: block;
+  min-height: 100%;
+  height: 100%;
+  overflow: auto;
+  color: #fff;
+}
+
+.card {
+  width: 100%;
+  max-width: none;
+  min-height: 100%;
+  margin: 0;
+  padding: 26px 0 20px;
+  text-align: left;
+}
+
+.update-section + .update-section { margin-top: 26px; }
+
+.section-label {
+  margin: 0 0 6px 12px;
+  color: rgba(255,255,255,0.5);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.update-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.update-row {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+  transition: background .18s ease, border-color .18s ease;
+}
+
+.update-row:hover {
+  border-color: rgba(255,255,255,.14);
+  background: rgba(255,255,255,.085);
+}
+
+.update-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(150deg, rgba(255,255,255,.22), rgba(255,255,255,.07));
+  color: #fff;
+}
+
+.update-icon .material-symbols-outlined { font-size: 25px; }
+.update-icon img { width: 100%; height: 100%; object-fit: cover; }
+.update-icon.success {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #34c759 0%, #2fca46 52%, #28cd41 100%);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 2px 6px rgba(0,0,0,.16);
+}
+.update-icon.success .material-symbols-outlined {
+  font-size: 27px;
+  font-variation-settings: 'FILL' 1, 'wght' 700;
+}
+.update-icon.system { background: transparent; }
+.update-icon.system img { width: 48px; height: 48px; object-fit: contain; }
+.update-icon.system.success {
+  background: linear-gradient(180deg, #34c759 0%, #2fca46 52%, #28cd41 100%);
+}
+
+.update-copy { min-width: 0; flex: 1; }
+
+.update-title {
+  overflow: hidden;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-subtitle {
+  overflow: hidden;
+  margin-top: 2px;
+  color: rgba(255,255,255,.76);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-action {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  padding: 7px 14px;
+  min-height: 32px;
+  outline: none;
+  background: rgba(255,255,255,.08);
+  color: #fff;
+  font: 500 13px/1.2 'Poppins', sans-serif;
+  cursor: pointer;
+  transition: background .16s ease, transform .16s ease;
+}
+
+.update-action:hover { background: rgba(255,255,255,.15); }
+.update-action:active { transform: scale(.97); }
+.update-action:disabled { opacity: .5; cursor: wait; }
+
+.update-action.primary {
+  border-color: transparent;
+  background: #0a84ff;
+}
+.update-action.primary:hover { background: #007aff; }
+
+.apps-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 3px 4px 0;
+}
+
+.progress-view {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: rgba(255,255,255,.72);
+  font-size: 11px;
+}
+
+.progress-track {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  border-radius: 4px;
+  background: rgba(255,255,255,.12);
+}
+
+.progress-fill {
+  border-radius: inherit;
+  background: #0a84ff;
+  box-shadow: none;
+}
+.progress-fill.complete { background: #34c759; box-shadow: none; }
+
+.notice {
+  margin: 10px 0 0;
+  color: rgba(255,255,255,.62);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.notice.error { color: #ff453a; }
+
+/* ── Channel Footer & Notes Design Menu ── */
+.channel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 32px;
+  padding: 16px 12px 0 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.channel-label {
+  font-size: 13px;
+  color: rgba(255,255,255,0.6);
+  font-weight: 500;
+}
+
+.tb { 
+  height: 32px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; 
+  gap: 6px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,.85); 
+  cursor: pointer; font-size: 13px; transition: background .15s, color .15s; font-family: inherit; 
+}
+.tb:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.tb.on { background: color-mix(in srgb, var(--accent) 25%, transparent); color: #fff; }
+.tb:disabled { opacity: .35; cursor: wait; }
+.tb.style-btn { min-width: 120px; justify-content: space-between; font-weight: 500; border: 1px solid rgba(255,255,255,0.05); }
+
+.menu { 
+  position: fixed; z-index: 1000; min-width: 160px; padding: 6px; border-radius: 14px; background: var(--menu); 
+  border: 1px solid rgba(255,255,255,.1); box-shadow: 0 18px 50px rgba(0,0,0,.5); backdrop-filter: blur(30px); 
+  display: none; flex-direction: column; animation: pop .18s var(--spring); 
+}
+.menu.open { display: flex; }
+@keyframes pop { from { opacity: 0; transform: scale(.96) translateY(4px); } }
+
+.menu button { 
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 9px; 
+  background: transparent; cursor: pointer; font-size: 13px; text-align: left; font-family: inherit; color: #fff; transition: background .15s;
+}
+.menu button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+.menu button.active { background: color-mix(in srgb, var(--accent) 25%, transparent); color: #fff; font-weight: 600; }
+.menu button:disabled { opacity: .4; cursor: default; }
+.menu button .ms { font-size: 18px; color: rgba(255,255,255,.7); width: 20px; }
+
+@media (max-width: 420px) {
+  .card { padding: 20px 0 16px; }
+  .update-row { gap: 10px; padding: 12px; }
+  .update-title { font-size: 15px; }
+  .update-subtitle { font-size: 11px; }
+  .update-action { padding: 7px 8px; font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+<main class="card" id="app">
+  <section class="update-section" aria-labelledby="systemLabel">
+    <h2 class="section-label" id="systemLabel">System</h2>
+    <div class="update-panel" aria-live="polite">
+      <div class="update-row">
+        <div class="update-icon system" aria-hidden="true">
+          <img src="/desktop/assets/icons/stars.png" alt="">
+        </div>
+        <div class="update-copy">
+          <div class="update-title" id="systemTitle">Checking for updates…</div>
+          <div class="update-subtitle" id="systemSubtitle">Connecting to the update service</div>
+        </div>
+        <button class="update-action primary" id="systemAction" type="button" hidden></button>
+      </div>
+      <div class="progress-view" id="systemProgress" hidden>
+        <div class="progress-meta"><span id="systemProgressStatus"></span><span id="systemProgressPercent"></span></div>
+        <div class="progress-track"><div class="progress-fill" id="systemProgressFill"></div></div>
+      </div>
+    </div>
+    <p class="notice" id="systemNotice" hidden></p>
+  </section>
+
+  <section class="update-section" aria-labelledby="appsLabel">
+    <h2 class="section-label" id="appsLabel">Apps</h2>
+    <div class="update-panel" id="appsPanel" aria-live="polite">
+      <div class="update-row">
+        <div class="update-icon" aria-hidden="true"><span class="material-symbols-outlined">sync</span></div>
+        <div class="update-copy">
+          <div class="update-title">Checking installed apps…</div>
+          <div class="update-subtitle">Looking for component updates</div>
+        </div>
+      </div>
+    </div>
+    <p class="notice" id="appsNotice" hidden></p>
+  </section>
+
+  <div class="channel-footer">
+    <span class="channel-label">Update Channel</span>
+    <button class="tb style-btn" id="channelBtn" title="Change update channel" disabled>
+      <span id="channelName">Loading...</span>
+      <span class="ms" style="font-size: 18px;">expand_more</span>
+    </button>
+  </div>
+
+  <nav class="links" aria-label="Update resources">
+    <a href="https://mariowstech.github.io/mariowOS-landpages/roadmap/index.html">Roadmap</a>
+  </nav>
+</main>
+
+<div class="menu" id="channelMenu">
+  <button data-channel="stable"><span class="ms">verified</span>Stable</button>
+  <button data-channel="beta"><span class="ms">science</span>Beta</button>
+  <button data-channel="insiders"><span class="ms">bug_report</span>Insiders</button>
+</div>
+
+<script>
+const appNames = {
+  calculator: ['Calculator', 'calculator.png', 'calculate'],
+  desktop: ['Desktop', 'stars.png', 'desktop_windows'],
+  explorer: ['Explorer', 'files.png', 'folder_open'],
+  feedback: ['Feedback', 'feedback.png', 'feedback'],
+  help: ['Help', 'stars.png', 'help'],
+  music: ['Music', 'music.png', 'music_note'],
+  notes: ['Notes', 'notes.png', 'edit_note'],
+  settings: ['Settings', 'settings.png', 'settings'],
+  store: ['Store', 'store.png', 'storefront'],
+  terminal: ['Terminal', 'terminal.png', 'terminal']
+};
+
+let activeUpdate = null;
+let pendingApps = [];
+
+function setNotice(id, message, isError = false) {
+  const notice = document.getElementById(id);
+  notice.textContent = message || '';
+  notice.hidden = !message;
+  notice.classList.toggle('error', isError);
+}
+
+function setAction(button, label, handler) {
+  button.textContent = label;
+  button.onclick = handler;
+  button.hidden = false;
+}
+
+function setSystemStatus(icon, title, subtitle, success = false) {
+  const iconElement = document.querySelector('#systemTitle').closest('.update-row').querySelector('.update-icon');
+  iconElement.classList.toggle('success', success);
+  if (success) {
+    const check = document.createElement('span');
+    check.className = 'material-symbols-outlined';
+    check.textContent = 'check';
+    iconElement.replaceChildren(check);
+  } else if (icon === 'auto_awesome') {
+    const stars = document.createElement('img');
+    stars.src = '/desktop/assets/icons/stars.png';
+    stars.alt = '';
+    iconElement.replaceChildren(stars);
+  } else {
+    const symbol = document.createElement('span');
+    symbol.className = 'material-symbols-outlined';
+    symbol.textContent = icon;
+    iconElement.replaceChildren(symbol);
+  }
+  document.getElementById('systemTitle').textContent = title;
+  document.getElementById('systemSubtitle').textContent = subtitle;
+}
+
+function setBusy(isBusy) {
+  document.querySelectorAll('.update-action').forEach(button => {
+    button.disabled = isBusy;
+  });
+}
+
+async function checkSystemUpdates() {
+  const action = document.getElementById('systemAction');
+  action.hidden = true;
+  setNotice('systemNotice', '');
+  try {
+    const response = await fetch('/api/system/check-update', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || 'Update check failed');
+
+    if (data.updateAvailable) {
+      setSystemStatus('auto_awesome', `mariowOS v${data.latest}`,
+        data.changelog || `System update available · v${data.current} → v${data.latest}`);
+      setAction(action, 'Install & restart', startSystemUpdate);
+    } else {
+      setSystemStatus('check', 'mariowOS is up to date', `Version ${data.current}`, true);
+    }
+  } catch (error) {
+    setSystemStatus('cloud_off', 'System update unavailable', 'Could not reach the update service');
+    setAction(action, 'Try again', checkSystemUpdates);
+    setNotice('systemNotice', error.message, true);
+    console.error('System update check failed:', error);
+  }
+}
+
+function makeAppRow(name, update) {
+  const [label, iconFile, symbol] = appNames[name] || [name, '', 'apps'];
+  const row = document.createElement('div');
+  row.className = 'update-row';
+
+  const icon = document.createElement('div');
+  icon.className = 'update-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  if (iconFile) {
+    const image = document.createElement('img');
+    image.src = `/desktop/assets/icons/${iconFile}`;
+    image.alt = '';
+    image.onerror = () => {
+      const fallback = document.createElement('span');
+      fallback.className = 'material-symbols-outlined';
+      fallback.textContent = symbol;
+      icon.replaceChildren(fallback);
+    };
+    icon.appendChild(image);
+  } else {
+    const iconSymbol = document.createElement('span');
+    iconSymbol.className = 'material-symbols-outlined';
+    iconSymbol.textContent = symbol;
+    icon.appendChild(iconSymbol);
+  }
+
+  const copy = document.createElement('div');
+  copy.className = 'update-copy';
+  const title = document.createElement('div');
+  title.className = 'update-title';
+  title.textContent = label;
+  const subtitle = document.createElement('div');
+  subtitle.className = 'update-subtitle';
+  subtitle.textContent = update
+    ? `Update available · ${update.current} → ${update.latest}`
+    : 'All apps are up to date';
+  copy.append(title, subtitle);
+  row.append(icon, copy);
+  return row;
+}
+
+function renderApps(updates) {
+  const panel = document.getElementById('appsPanel');
+  panel.replaceChildren();
+  pendingApps = updates;
+
+  if (!updates.length) {
+    const row = document.createElement('div');
+    row.className = 'update-row';
+    const icon = document.createElement('div');
+    icon.className = 'update-icon success';
+    icon.setAttribute('aria-hidden', 'true');
+    const check = document.createElement('span');
+    check.className = 'material-symbols-outlined';
+    check.textContent = 'check';
+    icon.appendChild(check);
+    const copy = document.createElement('div');
+    copy.className = 'update-copy';
+    const title = document.createElement('div');
+    title.className = 'update-title';
+    title.textContent = 'All apps are up to date';
+    copy.appendChild(title);
+    row.append(icon, copy);
+    panel.appendChild(row);
+    return;
+  }
+
+  updates.forEach(update => panel.appendChild(makeAppRow(update.name, update)));
+  const footer = document.createElement('div');
+  footer.className = 'apps-footer';
+  const action = document.createElement('button');
+  action.className = 'update-action primary';
+  action.type = 'button';
+  action.textContent = `Update ${updates.length === 1 ? 'app' : 'apps'}`;
+  action.addEventListener('click', startSotaUpdate);
+  footer.appendChild(action);
+  panel.appendChild(footer);
+}
+
+async function checkAppUpdates() {
+  setNotice('appsNotice', '');
+  try {
+    const response = await fetch('/api/system/check-sota-update', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'SOTA update check failed');
+    renderApps(data.updates || []);
+  } catch (error) {
+    const panel = document.getElementById('appsPanel');
+    panel.replaceChildren(makeAppRow('apps', null));
+    panel.firstElementChild.querySelector('.update-title').textContent = 'Could not check apps';
+    panel.firstElementChild.querySelector('.update-subtitle').textContent = 'The update service could not be reached';
+    setNotice('appsNotice', error.message, true);
+    console.error('SOTA update check failed:', error);
+  }
+}
+
+function updateProgress(kind, percent, status) {
+  const progress = document.getElementById(`${kind}Progress`);
+  const fill = document.getElementById(`${kind}ProgressFill`);
+  progress.hidden = false;
+  document.getElementById(`${kind}ProgressStatus`).textContent = status || 'Updating…';
+  document.getElementById(`${kind}ProgressPercent`).textContent = `${Math.round(percent)}%`;
+  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  fill.classList.toggle('complete', percent >= 100);
+}
+
+function startSystemUpdate() {
+  if (activeUpdate) return;
+  activeUpdate = 'system';
+  const action = document.getElementById('systemAction');
+  action.hidden = true;
+  document.getElementById('systemProgress').hidden = false;
+  setBusy(true);
+  startProgressStream('system', '/api/system/ota-update');
+}
+
+function startSotaUpdate() {
+  if (activeUpdate || !pendingApps.length) return;
+  activeUpdate = 'apps';
+  document.querySelector('#appsPanel .apps-footer')?.remove();
+  const progress = document.getElementById('appsProgress');
+  if (progress) progress.hidden = false;
+  else {
+    const view = document.createElement('div');
+    view.className = 'progress-view';
+    view.id = 'appsProgress';
+    view.innerHTML = '<div class="progress-meta"><span id="appsProgressStatus"></span><span id="appsProgressPercent"></span></div><div class="progress-track"><div class="progress-fill" id="appsProgressFill"></div></div>';
+    document.getElementById('appsPanel').appendChild(view);
+  }
+  setBusy(true);
+  startProgressStream('apps', '/api/system/sota-update');
+}
+
+function startProgressStream(kind, url) {
+  const eventSource = new EventSource(url);
+  eventSource.onmessage = event => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (error) {
+      eventSource.close();
+      finishUpdate(kind, false, 'The update service returned an invalid response.');
+      console.error('Could not parse update progress:', error);
+      return;
+    }
+    updateProgress(kind, data.percent, data.status);
+    if (!data.finished) return;
+    eventSource.close();
+    finishUpdate(kind, data.percent >= 100, data.status || 'Update finished.');
+  };
+  eventSource.onerror = () => {
+    eventSource.close();
+    finishUpdate(kind, false, 'Connection to the update service was lost.');
+  };
+}
+
+function finishUpdate(kind, succeeded, message) {
+  activeUpdate = null;
+  setBusy(false);
+  if (kind === 'system') {
+    const action = document.getElementById('systemAction');
+    if (succeeded) {
+      setSystemStatus('check', 'System update installed', 'Restart mariowOS to finish applying it.', true);
+      setAction(action, 'Restart', () => window.parent.location.reload());
+    } else {
+      setSystemStatus('error', 'System update failed', 'Your system was not updated.');
+      setAction(action, 'Try again', startSystemUpdate);
+      setNotice('systemNotice', message, true);
+    }
+    return;
+  }
+
+  const progress = document.getElementById('appsProgress');
+  if (progress) progress.hidden = true;
+  if (succeeded) {
+    setNotice('appsNotice', message);
+    checkAppUpdates();
+  } else {
+    setNotice('appsNotice', message, true);
+    checkAppUpdates().then(() => setNotice('appsNotice', message, true));
+  }
+}
+
+/* ── Menu Channel Logic (Notes Design) ── */
+const channelBtn = document.getElementById('channelBtn');
+const channelMenu = document.getElementById('channelMenu');
+const channelName = document.getElementById('channelName');
+
+function openMenu(menu, anchor) {
+  closeMenus();
+  menu.classList.add('open');
+  
+  const rect = anchor.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+
+  let leftPos = rect.left;
+  
+  // Se il menu sfora il margine destro dell'iframe, allinealo al lato destro del bottone
+  if (leftPos + menuRect.width > window.innerWidth - 8) {
+    leftPos = rect.right - menuRect.width;
+  }
+
+  // Applica le posizioni
+  menu.style.left = Math.max(8, leftPos) + 'px';
+  menu.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+}
+
+function closeMenus() {
+  document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+}
+
+// Chiude il menu se si clicca fuori
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('.menu') && !e.target.closest('#channelBtn')) {
+    closeMenus();
+  }
+});
+// Chiude il menu col tasto esc
+document.addEventListener('keydown', e => { 
+  if (e.key === 'Escape') closeMenus(); 
+});
+
+channelBtn.onclick = () => {
+  if (!channelMenu.classList.contains('open')) {
+    // Rendilo block temporaneamente per misurarlo (senza opacità) se necessario,
+    // o semplicemente aggiungendo open, le dimensioni vengono calcolate correttamente.
+    openMenu(channelMenu, channelBtn);
+  } else {
+    closeMenus();
+  }
+};
+
+function updateChannelUI(channel) {
+  const names = { stable: 'Stable', beta: 'Beta', insiders: 'Insiders' };
+  channelName.textContent = names[channel] || channel;
+  channelMenu.querySelectorAll('button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.channel === channel);
+  });
+}
+
+async function initChannelSelector() {
+  try {
+    const res = await fetch('/api/system/update-channel');
+    const data = await res.json();
+    let current = data.channel || 'stable';
+    
+    updateChannelUI(current);
+    channelBtn.disabled = false;
+
+    channelMenu.querySelectorAll('button').forEach(btn => {
+      btn.onclick = async () => {
+        closeMenus();
+        const newChannel = btn.dataset.channel;
+        if (newChannel === current) return;
+
+        channelBtn.disabled = true;
+        setBusy(true);
+        const names = { stable: 'Stable', beta: 'Beta', insiders: 'Insiders' };
+        setNotice('systemNotice', `Switching to ${names[newChannel] || newChannel}...`);
+        
+        try {
+          const reqRes = await fetch('/api/system/update-channel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: newChannel })
+          });
+          const reqData = await reqRes.json();
+          
+          if (!reqRes.ok || !reqData.success) {
+            throw new Error(reqData.error || 'Failed to change update channel.');
+          }
+          
+          current = newChannel;
+          updateChannelUI(newChannel);
+          setNotice('systemNotice', '');
+          await checkSystemUpdates();
+        } catch (err) {
+          setNotice('systemNotice', err.message, true);
+        } finally {
+          channelBtn.disabled = false;
+          setBusy(false);
+        }
+      };
+    });
+  } catch (e) {
+    console.error("Non è stato possibile caricare il canale di aggiornamento", e);
+  }
+}
+
+Promise.all([initChannelSelector(), checkSystemUpdates(), checkAppUpdates()]);
+</script>
+</body>
+</html>

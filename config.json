@@ -1,0 +1,12 @@
+{
+  "passwordHash": null,
+  "frpLock": false,
+  "allowFlashing": false,
+  "quickSettings": {
+    "wifi": true,
+    "bluetooth": true,
+    "dnd": false,
+    "powerMode": "Balanced",
+    "isEthernet": false
+  }
+}

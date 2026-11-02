@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0_DEVPREVIEW2",
-  "changelog": "fuck",
+  "version": "2.0.0_DEVPREVIEW3",
+  "changelog": "Updated store framework with support for other channels and an integrated button for updating the local repository.",
   "_comment": "obb."
 }

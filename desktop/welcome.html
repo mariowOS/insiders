@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="/desktop/assets/i18n-data.js"></script>
+    <script src="/desktop/assets/i18n.js"></script>
+    <script src="/desktop/assets/mariowos-dialogs.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="/desktop/assets/fonts/fonts.css" rel="stylesheet">
-    <title>mariowOS Setup</title>
+    <link href="/desktop/assets/setup.css" rel="stylesheet">
+    <title data-i18n="setup.title">mariowOS Setup</title>
     <style>
         * {
             margin: 0;
@@ -165,7 +169,7 @@
             width: 100%;
             left: 0;
             top: 50%; /* Insieme al translateY(-50%) centra perfettamente questo testo di 4rem nel blocco di 80px */
-            font-size: 4rem;
+            font-size: var(--setup-title-size);
             font-weight: 800;
             text-transform: uppercase;
             background: linear-gradient(270deg, #ff007f, #7f00ff, #00d4ff, #7f00ff, #ff007f);
@@ -303,17 +307,18 @@
     <!-- Restore Backup -->
     <button class="btn-restore" onclick="document.getElementById('backup-upload').click()">
         <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-        Restore Backup
+        <span data-i18n="setup.welcome.restore-backup">Restore Backup</span>
     </button>
     <input type="file" id="backup-upload" accept=".json" style="display: none;" onchange="importBackup(event)">
 
     <!-- Next Button -->
-    <a href="/desktop/license.html" class="btn-link">
+    <a href="/desktop/license.html" class="btn-link" aria-label="Next" data-i18n-aria-label="setup.next">
         <div class="arrow-button">
             <svg viewBox="0 0 24 24"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
         </div>
     </a>
 
+    <script src="/desktop/assets/setup.js"></script>
     <script>
         document.addEventListener("DOMContentLoaded", () => {
             const rotator = document.getElementById('yin-yang-rotator');
@@ -429,12 +434,13 @@
             }, 9500);
 
             // FASE 6: Animazione del testo Warp (Copy/Paste Smooth Replace)
-            setTimeout(() => {
+            let greetingTimer;
+            const greetingStart = setTimeout(() => {
                 const greetings = ["Hello", "Ciao", "Buna", "你好", "Hola", "Bonjour", "こんにちは", "Привет"];
                 let greetingIndex = 0;
                 const textContainer = document.getElementById('text-new-container');
                 
-                setInterval(() => {
+                greetingTimer = setInterval(() => {
                     const currentWord = textContainer.querySelector('.word-active');
                     
                     // Creiamo la nuova parola in stato "enter"
@@ -460,8 +466,20 @@
                     newWord.classList.add('word-active');
                     
                     greetingIndex = (greetingIndex + 1) % greetings.length;
-                }, 2500); 
-            }, 11000); 
+                }, MWSetup.CYCLE_MS);
+            }, 11000);
+
+            // FASE 7: La parola sale in alto a sinistra e diventa il titolo della schermata successiva
+            document.querySelector('.btn-link').addEventListener('click', async (event) => {
+                event.preventDefault();
+                const nextPage = event.currentTarget.getAttribute('href');
+                clearTimeout(greetingStart);
+                clearInterval(greetingTimer);
+                document.getElementById('new-os').classList.add('hide');
+                document.querySelector('.btn-restore').classList.remove('show-btn');
+                await MWSetup.flyToTitle(document.querySelector('#text-new-container .word-active'));
+                MWSetup.go(nextPage);
+            }, { once: true });
         });
 
         // Logica Restore
@@ -477,10 +495,10 @@
                     if(res.success) {
                         window.location.href = '/'; 
                     } else {
-                        mDialog.alert("Restore failed: " + res.error);
+                        mDialog.alert(mariowOSI18n.t("setup.welcome.restore-failed", "Restore failed: {error}", { error: res.error }));
                     }
                 })
-                .catch(err => mDialog.alert("Error restoring backup."));
+                .catch(err => mDialog.alert(mariowOSI18n.t("setup.welcome.restore-error", "Error restoring backup.")));
         }
     </script>
 </body>

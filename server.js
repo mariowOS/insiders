@@ -3007,9 +3007,11 @@ app.get('/api/system/check-update', async (req, res) => {
       return res.json({ updateAvailable: false, current: local, latest: remote.version, blocked: true,
         error: `Version ${remote.version} was rolled back because it did not start. Waiting for a fixed release.` });
     }
+        const installedChannel = config.installedChannel || (/[_-][A-Za-z]/.test(String(local)) ? "insiders" : channel);
+    const channelSwitched = installedChannel !== channel && remote.version !== local;
     res.json(
-      isNewerVersion(remote.version, local)
-        ? { updateAvailable: true, current: local, latest: remote.version, changelog: remote.changelog }
+      (isNewerVersion(remote.version, local) || channelSwitched)
+        ? { updateAvailable: true, current: local, latest: remote.version, changelog: remote.changelog, channelSwitch: channelSwitched }
         : { updateAvailable: false, current: local, latest: remote.version }
     );
   } catch (error) { 
@@ -3072,6 +3074,7 @@ app.get('/api/system/ota-update', (req, res) => {
         try {
           await launchServerReplacement(stagePath, serverUpdate.mode);
           transaction.commit();
+                  config.installedChannel = channel; saveConfig();
         } catch (error) {
           transaction.rollback();
           throw error;
@@ -3081,6 +3084,7 @@ app.get('/api/system/ota-update', (req, res) => {
         setTimeout(() => process.exit(SERVER_EXIT_CODES.UPDATE_RESTART), 300);
       } else {
         transaction.commit();
+                config.installedChannel = channel; saveConfig();
         fs.rmSync(stagePath, { recursive: true, force: true });
         send(100, "Update complete. No server restart is required.", true);
         res.end();

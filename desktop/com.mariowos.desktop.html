@@ -269,7 +269,6 @@ Questions? https://discord.gg/YDVxw6jfbH
       position: absolute; bottom: 0; left: 0; width: 100vw; height: 48px;
       display: flex; align-items: center; justify-content: space-between;
       z-index: 1000; padding: 0 12px; box-sizing: border-box; background: transparent !important; opacity: 1;
-      animation: taskbarSlideUp 0.6s var(--spring) both;
     }
     .status-bar-bg {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -299,7 +298,9 @@ Questions? https://discord.gg/YDVxw6jfbH
       transition: width 0.3s var(--spring), margin 0.3s var(--spring), opacity 0.3s ease, transform 0.35s var(--spring-bounce), background 0.15s ease;
       position: relative; margin: 0 4px; overflow: hidden; opacity: 1; flex-shrink: 0;
     }
-    .dock-icon:hover { background: rgba(255, 255, 255, 0.08) !important; transform: scale(1.15) translateY(-4px); }
+    .dock-icon:hover { background: rgba(255, 255, 255, 0.08) !important; }
+    /* Magnifying on hover is opt-in (Settings > Wallpaper & style > Magnify dock icons). */
+    body.dock-magnify .dock-icon:hover { transform: scale(1.15) translateY(-4px); }
     .dock-icon.running:hover { transform: none !important; background: rgba(255, 255, 255, 0.08) !important; }
     .dock-icon:active { transform: scale(0.85) translateY(2px); background: rgba(255, 255, 255, 0.05) !important; }
 
@@ -309,9 +310,12 @@ Questions? https://discord.gg/YDVxw6jfbH
     .dock-icon.drag-over-right { transform: translateX(-8px) scale(1.1); }
     .dock-icon img, .dock-icon .menu-icon-symbol { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; pointer-events: none; transition: transform 0.35s var(--spring-bounce); }
     .dock-icon:active img, .dock-icon:active .menu-icon-symbol { transform: scale(0.9); }
-    .dock-icon::after { content: ''; position: absolute; bottom: 2px; width: 0px; height: 3px; background: var(--m3-accent-text); border-radius: 3px; transition: width 0.4s var(--spring-bounce); }
-    .dock-icon.running::after { width: 14px; }
-    .dock-icon.boot-anim { opacity: 0; animation: iconPop 0.5s var(--spring-bounce) forwards; }
+    /* Like Windows 11: the app in front has a long accent pill, others that are running (or
+       minimized) a short grey dash, and the pill stretches or shrinks as focus moves. */
+    .dock-icon::after { content: ''; position: absolute; bottom: 2px; width: 0px; height: 3px; background: var(--m3-accent-text); border-radius: 3px; transition: width 0.4s var(--spring-bounce), background 0.25s ease; }
+    .dock-icon.running::after { width: 6px; background: rgba(255, 255, 255, 0.55); }
+    .dock-icon.running.win-focus::after { width: 16px; background: var(--m3-accent-text); }
+    /* .dock-icon.boot-anim: the startup entrance animates the dock (see "Desktop entrance"). */
 
     .search-btn {
       display: flex; align-items: center; gap: 6px; border-radius: 8px; padding: 5px 10px;
@@ -566,22 +570,24 @@ Questions? https://discord.gg/YDVxw6jfbH
       width: 100vw;
       height: 100vh;
       z-index: 100000;
-      transform: translateY(-100%);
+      /* No sliding sheet: the lock screen fades in and plays its own motion (its wallpaper
+         settles, the clock and controls rise); unlocking, it plays that back and fades while the
+         desktop arrives behind it from the same wallpaper zoom. */
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
-      transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease, visibility 0.45s;
+      transition: opacity 0.22s ease, visibility 0s linear 0.22s;
     }
     .lockscreen-overlay.active {
-      transform: translateY(0);
       opacity: 1;
       visibility: visible;
       pointer-events: auto;
+      transition: opacity 0.22s ease, visibility 0s;
     }
     .lockscreen-overlay.unlocking {
-      transform: translateY(-100%);
-      opacity: 1;
-      transition: transform 0.5s cubic-bezier(0.4, 0, 0.1, 1);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.24s ease;
     }
     .lockscreen-overlay iframe {
       width: 100%;
@@ -854,7 +860,6 @@ Questions? https://discord.gg/YDVxw6jfbH
     .cp-circles .hmos-circle-toggle .hmos-icon-bg { width: 50px; height: 50px; }
     .cp-circles .hmos-icon-bg .material-symbols-outlined { font-size: 24px; }
     .cp-circles .hmos-label { max-width: 72px; font-size: 11px; line-height: 1.25; text-align: center; color: rgba(255,255,255,0.8); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    #tileMute.active { --qs-tint: #ff453a; }
     /* Edit mode: everything but the tiles steps back, the tiles get a rim and follow the pointer. */
     /* The hint takes the title's place, so the Done button stays under the pointer. */
     .cp-hint { display: none; min-width: 0; font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -971,6 +976,285 @@ Questions? https://discord.gg/YDVxw6jfbH
     body.task-view .popup .resize-handle { pointer-events: none; }
     .popup.tv-hot { box-shadow: 0 0 0 6px rgba(255,255,255,0.5), 0 30px 70px rgba(0,0,0,0.55) !important; }
 
+
+    /* ═══ Tablet mode: a full-screen shell in the style of HarmonyOS NEXT on tablets ═══
+       tablet-mode: the tablet's own layers exist (home, status bar, dock, home bar).
+       tablet-apps: windows are full-screen apps. tablet-hide-desktop: the desktop is put away.
+       tablet-app-open: an app is in front of the home screen. */
+    #tabletHome, #tabletStatus, #tabletDock, #tabletHomeBar { display: none; }
+    body.tablet-mode #tabletHome { display: block; position: fixed; inset: 0; z-index: 200; transform-origin: 50% 46%; will-change: transform, opacity; }
+    body.tablet-app-open #tabletHome { pointer-events: none; }
+    .th-grid { display: grid; grid-template-columns: repeat(6, 128px); grid-auto-rows: 118px; gap: 18px 26px; justify-content: center; align-content: start; padding-top: max(70px, calc(50vh - 330px)); }
+    .th-widget { grid-column: span 2; grid-row: span 2; position: relative; box-sizing: border-box; padding: 22px 24px; border-radius: 28px; color: #fff; overflow: hidden;
+      background: rgba(28, 32, 44, 0.42); -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%); box-shadow: 0 12px 34px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.08); }
+    .thc-time { font-size: 64px; font-weight: 600; line-height: 1; letter-spacing: -1px; margin-top: 18px; }
+    .thc-date { margin-top: 10px; font-size: 16px; font-weight: 500; color: rgba(255,255,255,0.85); }
+    .thc-greet { position: absolute; left: 24px; right: 24px; bottom: 22px; font-size: 13px; color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .thk-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+    .thk-month { font-size: 15px; font-weight: 600; color: #ff6961; }
+    .thk-year { font-size: 12px; color: rgba(255,255,255,0.5); }
+    .thk-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 3px; text-align: center; font-size: 11.5px; }
+    .thk-grid span { height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
+    .thk-grid .dn { color: rgba(255,255,255,0.45); font-weight: 600; font-size: 10.5px; }
+    .thk-grid .out { color: rgba(255,255,255,0.25); }
+    .thk-grid .today { background: #ff453a; color: #fff; font-weight: 600; width: 26px; justify-self: center; }
+    .th-app { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; border: 0; padding: 0; background: transparent; color: #fff; cursor: pointer; font: 500 13px 'Poppins', sans-serif; }
+    .th-icon { width: 66px; height: 66px; display: flex; align-items: center; justify-content: center; transition: transform 0.35s var(--spring-bounce), filter 0.2s ease; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.28)); }
+    .th-icon img, .th-icon .menu-icon { width: 66px; height: 66px; object-fit: contain; }
+    .th-icon .menu-icon-symbol { font-size: 44px; }
+    .th-app:hover .th-icon { transform: scale(1.06); }
+    .th-app:active .th-icon { transform: scale(0.88); filter: drop-shadow(0 3px 8px rgba(0,0,0,0.3)) brightness(0.85); transition-duration: 0.12s; }
+    .th-label { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 6px rgba(0,0,0,0.55); }
+    .th-app.running::after { content: ''; position: absolute; bottom: 4px; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.85); }
+
+    body.tablet-mode #tabletStatus { display: flex; position: fixed; top: 0; left: 0; right: 0; height: 30px; z-index: 2147480003; align-items: center; padding: 0 14px; color: #fff; font: 500 13px 'Poppins', sans-serif; text-shadow: 0 1px 4px rgba(0,0,0,0.4); transition: background 0.35s ease; }
+    body.tablet-app-open #tabletStatus { background: rgba(10, 12, 18, 0.55); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+    #tabletStatus button { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border: 0; border-radius: 13px; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: background 0.15s ease; }
+    #tabletStatus button:hover { background: rgba(255,255,255,0.12); }
+    #tabletStatus .material-symbols-outlined { font-size: 17px; }
+    .ts-gap { flex: 1; }
+    #tsDate { color: rgba(255,255,255,0.8); }
+    .ts-battery { display: inline-flex; align-items: center; gap: 3px; }
+
+    body.tablet-mode #tabletDock { display: flex; position: fixed; bottom: 14px; left: 0; right: 0; margin: 0 auto; width: max-content; z-index: 2147480001; align-items: center; gap: 6px; padding: 10px 14px; border-radius: 28px;
+      background: rgba(30, 34, 46, 0.42); -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%); box-shadow: 0 14px 40px rgba(0,0,0,0.3), inset 0 0 0 1px rgba(255,255,255,0.1); will-change: transform; }
+    body.task-view #tabletDock { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+    .td-app { position: relative; width: 62px; height: 62px; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; border-radius: 16px; background: transparent; cursor: pointer; transition: transform 0.35s var(--spring-bounce); }
+    .td-app:hover { transform: translateY(-5px) scale(1.08); }
+    .td-app:active { transform: scale(0.86); transition-duration: 0.12s; }
+    .td-icon { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+    .td-icon img, .td-icon .menu-icon { width: 54px; height: 54px; object-fit: contain; }
+    .td-icon .menu-icon-symbol { font-size: 36px; }
+    .td-app.running::after { content: ''; position: absolute; bottom: -3px; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.85); }
+    .td-sep { width: 1px; height: 40px; margin: 0 6px; background: rgba(255,255,255,0.18); }
+    .td-recents .td-icon { width: 46px; height: 46px; border-radius: 13px; background: linear-gradient(180deg, #bf5af2, #af52de); color: #fff; box-shadow: 0 3px 10px rgba(175, 82, 222, 0.4); }
+    .td-recents .td-icon .material-symbols-outlined { font-size: 26px; }
+
+    /* The pill stays at the very bottom, but the area that takes the gesture is much bigger:
+       a tall strip across the middle of the screen, so a swipe can start well above the edge
+       (where Windows' own edge swipe lives). Taps in it that are not on the pill reach the app. */
+    body.tablet-app-open #tabletHomeBar { display: flex; position: fixed; left: 50%; bottom: 0; width: min(900px, 80vw); margin-left: max(-450px, -40vw); height: 64px; z-index: 2147480002; align-items: flex-end; justify-content: center; padding-bottom: 7px; box-sizing: border-box; cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+    #tabletHomeBar span { width: 136px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.78); box-shadow: 0 0 6px rgba(0,0,0,0.35); transition: width 0.3s var(--spring), height 0.3s var(--spring), background 0.2s ease; pointer-events: none; }
+    #tabletHomeBar:hover span { width: 160px; background: #fff; }
+    #tabletHomeBar.held span { width: 184px; height: 6px; background: #fff; }
+    #tabletHomeBar.armed span { width: 64px; }
+    body.task-view #tabletHomeBar { display: none; }
+
+    /* Apps are full screen under the status bar, without window controls. */
+    body.tablet-apps .popup:not([id^="dialog_"]) { left: 0 !important; top: 30px !important; width: 100vw !important; height: calc(100vh - 30px) !important; border-radius: 0; box-shadow: none !important; }
+    body.tablet-apps .popup.active { animation: none !important; opacity: 1; }
+    /* No window chrome: apps leave through the home bar and recents. A header that only holds the
+       title goes; one that holds the app's tabs (Browser, Files, Terminal) stays, without buttons. */
+    body.tablet-apps .popup:not([id^="dialog_"]) .popup-header .window-actions { display: none !important; }
+    body.tablet-apps .popup:not([id^="dialog_"]):not(:has(.browser-tabs, #os-files-tabs, #os-term-tabs)) > .popup-header { display: none !important; }
+    body.tablet-apps .popup:not([id^="dialog_"]):not(:has(.browser-tabs, #os-files-tabs, #os-term-tabs)) > .popup-frame { height: 100%; }
+    body.tablet-apps .popup:not([id^="dialog_"]):not(:has(.browser-tabs, #os-files-tabs, #os-term-tabs)) > .popup-glass { top: 0; height: 100%; }
+    body.tablet-apps .popup .resize-handle, body.tablet-apps .popup-header .min-btn, body.tablet-apps .popup-header .max-btn { display: none !important; }
+    body.tablet-apps .popup-header { cursor: default; }
+    /* ═══ Desktop motion, in the style of HarmonyOS ═══ */
+    /* Windows that open and minimize on a spring from script (see "Desktop motion") skip the CSS keyframes. */
+    .popup.mw-anim.active, .popup.mw-anim.minimizing { animation: none !important; opacity: 1; transform: none; }
+    /* Depth: while the apps menu or task view is up, the desktop sinks back behind it. */
+    body:not(.tablet-mode) #desktop-wallpaper { transition: scale 0.7s var(--spring); }
+    body:not(.tablet-mode) #desktop-icons, body:not(.tablet-mode) #desktopWidgets { transition: scale 0.6s var(--spring), opacity 0.35s ease; transform-origin: 50% 45%; }
+    body:not(.tablet-mode):has(#actionsDropdown.open) #desktop-wallpaper, body.task-view:not(.tablet-mode) #desktop-wallpaper { scale: 1.06; }
+    body:not(.tablet-mode):has(#actionsDropdown.open) #desktop-icons, body:not(.tablet-mode):has(#actionsDropdown.open) #desktopWidgets,
+    body.task-view:not(.tablet-mode) #desktop-icons, body.task-view:not(.tablet-mode) #desktopWidgets { scale: 0.94; opacity: 0.35; }
+    /* Press feedback: things sink a little under the finger and spring back. */
+    .mw-widget { transition: box-shadow 0.25s ease, scale 0.45s var(--spring-bounce); }
+    body:not(.widget-edit) .mw-widget:active { scale: 0.97; }
+    .desktop-item { transition: background 0.15s, transform 0.1s, scale 0.45s var(--spring-bounce); }
+    .desktop-item:active { scale: 0.95; }
+    @media (prefers-reduced-motion: reduce) {
+      body #desktop-wallpaper, body #desktop-icons, body #desktopWidgets { scale: none !important; transition: none !important; }
+    }
+    /* Startup: hidden until the entrance plays (see "Desktop entrance"). */
+    body.desk-booting .status-left > :not(.dropdown), body.desk-booting .status-right > *,
+    body.desk-booting .status-center .dock-icon, body.desk-booting #desktop-icons, body.desk-booting #desktopWidgets { opacity: 0; }
+    body.desk-booting .status-bar-bg { transform: translateY(100%); }
+    /* The wallpaper is never hidden (no black screen): it waits slightly zoomed, where the sign-in screen left it. */
+    body.desk-booting #desktop-wallpaper { scale: 1.08; }
+    /* ═══ Alt+Tab window switcher ═══ */
+    #winSwitcher { position: fixed; inset: 0; z-index: 2147480600; display: flex; align-items: center; justify-content: center; pointer-events: none; visibility: hidden; }
+    #winSwitcher.open { visibility: visible; pointer-events: auto; }
+    .wsw-panel { position: relative; display: flex; gap: 10px; max-width: calc(100vw - 48px); padding: 14px; overflow-x: auto; scrollbar-width: none; box-sizing: border-box; border-radius: 28px;
+      background: rgba(24, 28, 38, 0.58); -webkit-backdrop-filter: blur(40px) saturate(200%); backdrop-filter: blur(40px) saturate(200%); box-shadow: 0 30px 80px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.1);
+      opacity: 0; transform: scale(0.9); transition: opacity 0.14s ease, transform 0.18s cubic-bezier(0.4, 0, 1, 1); }
+    #winSwitcher.open .wsw-panel { opacity: 1; transform: none; transition: opacity 0.2s ease, transform 0.45s var(--spring); }
+    .wsw-card { position: relative; z-index: 1; flex: 0 0 156px; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 10px 10px 12px; border: 0; border-radius: 20px; background: transparent; color: #fff; font: 500 13px 'Poppins', sans-serif; cursor: pointer; }
+    #winSwitcher.open .wsw-card { animation: wswCardIn 0.5s var(--spring) backwards; animation-delay: calc(var(--i) * 28ms); }
+    @keyframes wswCardIn { from { opacity: 0; transform: translateY(14px) scale(0.92); } to { opacity: 1; transform: none; } }
+    .wsw-preview { position: relative; width: 136px; height: 92px; display: flex; align-items: center; justify-content: center; border-radius: 16px; background: rgba(255,255,255,0.08); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); transition: transform 0.35s var(--spring-bounce); }
+    .wsw-preview img, .wsw-preview .menu-icon, .wsw-preview .menu-icon-symbol { width: 52px; height: 52px; object-fit: contain; font-size: 52px; }
+    .wsw-card.on .wsw-preview { transform: scale(1.04); }
+    .wsw-min { position: absolute; right: 8px; bottom: 6px; font-size: 16px; color: rgba(255,255,255,0.6); }
+    .wsw-label { max-width: 136px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.8); }
+    .wsw-card.on .wsw-label { color: #fff; }
+    /* The selection: one ring that glides from card to card. */
+    .wsw-ring { position: absolute; left: 0; top: 0; z-index: 0; border-radius: 20px; pointer-events: none; background: rgba(255,255,255,0.12); box-shadow: inset 0 0 0 2px var(--m3-accent-active);
+      transition: transform 0.38s var(--spring), width 0.38s var(--spring), height 0.38s var(--spring); }
+    @media (prefers-reduced-motion: reduce) { .wsw-ring, .wsw-panel, #winSwitcher.open .wsw-panel { transition: none; } #winSwitcher.open .wsw-card { animation: none; } }
+    /* --- Privacy mode --- */
+    #tilePrivacy.active { --qs-tint: #3f7dff; }
+    .qsi-shield, .qsi-tick { stroke-dasharray: 1; transition: fill 0.3s var(--spring), opacity 0.3s ease; }
+    .qsi-shield { transform-box: view-box; transform-origin: 12px 12px; }
+    .active > .hmos-icon-bg .qsi-shield { fill: currentColor; }
+    .qsi-tick { stroke: var(--qs-tint, #3f7dff); stroke-width: 2.4; opacity: 0; }
+    .active > .hmos-icon-bg .qsi-tick { opacity: 1; }
+    .inactive .qsi-shield { opacity: 0.55; }
+    @keyframes qsiShield { 0% { stroke-dashoffset: 1; fill: transparent; transform: scale(0.7); } 55% { stroke-dashoffset: 0; fill: transparent; transform: scale(1.08); } 100% { stroke-dashoffset: 0; fill: currentColor; transform: scale(1); } }
+    .qs-anim .qsi-shield { animation: qsiShield 0.62s cubic-bezier(0.3, 0.7, 0.2, 1) both; }
+    .qs-anim .qsi-tick { animation: qsiDraw 0.3s ease-out 0.48s both; }
+
+    /* The taskbar's shield: there while privacy mode is on. */
+    .tray-privacy { display: inline-flex; align-items: center; width: 0; margin-right: -9px; opacity: 0; overflow: visible; transition: width 0.42s var(--spring), margin 0.42s var(--spring), opacity 0.25s ease; }
+    .tray-privacy svg { width: 17px; height: 17px; flex: 0 0 17px; fill: #6cb6ff; transition: opacity 0.2s ease; }
+    .tray-privacy .tp-tick { fill: none; stroke: #0d1a33; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    body.privacy-mode .tray-privacy { width: 17px; margin-right: 0; opacity: 1; }
+    body.privacy-arriving .tray-privacy svg { opacity: 0; transition: none; }
+
+    /* Notification text: what it says gives way to "Content hidden". */
+    .pm-mask { display: none; align-items: center; gap: 5px; color: rgba(255,255,255,0.6); }
+    .pm-mask .material-symbols-outlined { font-size: 14px; }
+    body.privacy-mode .pm-real { display: none; }
+    body.privacy-mode .pm-mask { display: inline-flex; animation: pmIn 0.4s var(--spring) both; }
+    @keyframes pmIn { from { opacity: 0; filter: blur(4px); } to { opacity: 1; filter: none; } }
+
+    /* Every window but the one in use is frosted over (title bar aside), on the desktop and in
+       Task View alike, so only what you're working on can be read. */
+    .popup::after { content: ''; position: absolute; inset: 36px 0 0; z-index: 60; border-bottom-left-radius: inherit; border-bottom-right-radius: inherit; pointer-events: none; opacity: 0; visibility: hidden;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='rgba(255,255,255,0.92)' d='M12 2.8l7.3 2.8c.5.2.8.6.8 1.1v5c0 4.7-3.2 8.4-8.1 10-4.9-1.6-8.1-5.3-8.1-10v-5c0-.5.3-.9.8-1.1z'/%3E%3Cpath d='M8.5 12.3l2.5 2.5 4.6-4.8' fill='none' stroke='%232a55e8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / auto min(26%, 84px) no-repeat, rgba(16, 22, 38, 0.6);
+      -webkit-backdrop-filter: blur(48px) saturate(140%); backdrop-filter: blur(48px) saturate(140%); transition: opacity 0.3s ease, visibility 0s linear 0.3s; }
+    body.tablet-apps .popup::after { inset: 0; border-radius: inherit; }
+    body.privacy-mode .popup:not(.focused)::after { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s; }
+
+    /* The shield itself: a pane of glass that bends what's behind it, in a fall of glitter.
+       Nothing above the glass may fade or filter (that would cut it off from the backdrop it
+       bends), so the shield's parts fade one by one and only their holder moves. */
+    #privacyShield { position: fixed; inset: 0; z-index: 2147482000; pointer-events: none; visibility: hidden; }
+    #privacyShield.show { visibility: visible; }
+    .ps-defs { position: absolute; width: 0; height: 0; }
+    .ps-veil { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at 50% 46%, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.36) 78%); }
+    .ps-glitter { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+    .ps-center { position: absolute; left: 50%; top: 46%; width: 0; height: 0; }
+    .ps-fly { position: absolute; left: calc(var(--psw, 300px) / -2); top: calc(var(--psh, 394px) / -2); width: var(--psw, 300px); height: var(--psh, 394px); }
+    .ps-glass { position: absolute; inset: 0; opacity: 0; clip-path: url(#psGlassClip);
+      background: linear-gradient(165deg, rgba(255,255,255,0.26), rgba(255,255,255,0.06) 36%, rgba(255,255,255,0.02) 68%, rgba(255,255,255,0.14));
+      -webkit-backdrop-filter: url(#psLens) brightness(1.1) saturate(1.3); backdrop-filter: url(#psLens) brightness(1.1) saturate(1.3); }
+    .ps-rim, .ps-solid { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; opacity: 0; }
+    .ps-rim path { fill: none; stroke-linejoin: round; }
+    .ps-rim-edge { stroke: rgba(255, 255, 255, 0.7); stroke-width: 0.5; }
+    .ps-rim-light { stroke: url(#psRimLight); stroke-width: 2.4; }
+    .ps-rim-red { stroke: rgba(255, 96, 150, 0.5); stroke-width: 1.4; transform: translate(-0.8px, 0.4px); }
+    .ps-rim-blue { stroke: rgba(96, 196, 255, 0.6); stroke-width: 1.4; transform: translate(0.8px, -0.3px); }
+    .ps-glint { fill: url(#psGlintFill); opacity: 0.85; }
+    .ps-body { fill: url(#psFill); }
+    .ps-check { fill: none; stroke: #fff; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+    .ps-ring { position: absolute; left: calc(var(--psh, 394px) * -0.32); top: calc(var(--psh, 394px) * -0.32); width: calc(var(--psh, 394px) * 0.64); height: calc(var(--psh, 394px) * 0.64); border-radius: 50%; opacity: 0;
+      border: 1.5px solid rgba(255, 255, 255, 0.55); box-shadow: inset 0 0 34px rgba(255, 255, 255, 0.2), 0 0 24px rgba(255, 255, 255, 0.12); }
+
+    /* In tablet mode a window sent home is parked, not removed from layout: the scripts still mark
+       it display:none, but it stays laid out and simply isn't drawn, so going home and coming back
+       never re-lays-out the whole app (that cost a 150ms frame each way). */
+    body.tablet-apps .popup:not([id^="dialog_"])[style*="display: none"] { display: block !important; visibility: hidden !important; content-visibility: hidden; pointer-events: none !important; }
+    .tablet-cover { position: absolute; inset: 0; z-index: 70; pointer-events: none; opacity: 0; background: rgb(30, 34, 46); }
+    .tablet-fly { position: fixed; z-index: 2147479990; pointer-events: none; display: flex; align-items: center; justify-content: center; transform-origin: 0 0; }
+    .tablet-fly img, .tablet-fly .menu-icon { width: 100%; height: 100%; object-fit: contain; }
+
+    /* The desktop is put away; its panels stay, opened from the tablet status bar. */
+    body.tablet-hide-desktop #desktop-icons { display: none; }
+    body.tablet-mode .status-bar { z-index: 2147480004; }
+    /* Its entrance animation would keep it a containing block, and the panels below are fixed to the screen. */
+    body.tablet-hide-desktop .status-bar { visibility: hidden; animation: none; transform: none; }
+    body.tablet-hide-desktop #notificationsDropdown { position: fixed; top: 38px; right: 12px; bottom: auto; transform-origin: top right; transform: translateY(calc(-100% - 60px)); }
+    body.tablet-hide-desktop #notificationsDropdown.open { transform: translateY(0) translateZ(0); }
+    body.tablet-hide-desktop #calendarDropdown.dropdown:not(.panel-warmup) { position: fixed; top: 38px; left: 12px; right: auto; bottom: auto; height: calc(100vh - 50px); transform: translateX(calc(-100% - 24px)); }
+    body.tablet-hide-desktop #calendarDropdown.dropdown.open { transform: translateX(0) translateZ(0); }
+    body.tablet-mode #tvClearAll { bottom: 56px; }
+
+    /* Recents: one Clear all for every card. */
+    /* Above the taskbar (48px, drawn over the task view), with the cards laid out clear of it. */
+    #tvClearAll { position: absolute; left: 50%; bottom: 66px; width: 52px; height: 52px; margin-left: -26px; border: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.16); color: #fff; font-size: 26px; cursor: pointer; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); transition: background 0.2s ease, transform 0.3s var(--spring-bounce); }
+    #tvClearAll:hover { background: rgba(255,255,255,0.26); transform: scale(1.06); }
+    #taskView.empty #tvClearAll { display: none; }
+
+    /* ═══ Widgets (tablet home screen and desktop) ═══ */
+    .mw-widget { position: relative; box-sizing: border-box; padding: 20px 22px; border-radius: 28px; color: #fff; overflow: hidden; cursor: pointer; font-family: 'Poppins', sans-serif;
+      background: rgba(28, 32, 44, 0.42); -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%); box-shadow: 0 12px 34px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.08);
+      display: flex; flex-direction: column; transition: box-shadow 0.25s ease; }
+    #desktopWidgets { position: fixed; inset: 0 0 48px 0; z-index: 6; pointer-events: none; }
+    #desktopWidgets .mw-widget { position: absolute; width: 286px; height: 214px; pointer-events: auto; }
+    body.tablet-hide-desktop #desktopWidgets { display: none; }
+    .w-time { font-size: 58px; font-weight: 600; line-height: 1; letter-spacing: -1px; margin-top: auto; white-space: nowrap; }
+    .w-time small { margin-left: 8px; font-size: 20px; font-weight: 600; letter-spacing: 0; color: rgba(255,255,255,0.75); }
+    .w-date { margin-top: 8px; font-size: 15px; font-weight: 500; color: rgba(255,255,255,0.85); }
+    .w-greet { margin-top: auto; padding-top: 10px; font-size: 12.5px; color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-cal-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+    .w-month { font-size: 15px; font-weight: 600; color: #ff6961; }
+    .w-year { font-size: 12px; color: rgba(255,255,255,0.5); }
+    .w-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 1px; text-align: center; font-size: 11px; }
+    .w-cal-grid span { height: 22px; display: flex; align-items: center; justify-content: center; }
+    .w-cal-grid .dn { color: rgba(255,255,255,0.45); font-weight: 600; font-size: 10px; }
+    .w-cal-grid .today { background: #ff453a; border-radius: 50%; width: 22px; justify-self: center; font-weight: 600; }
+    .w-cal-ev { margin-top: auto; padding-top: 6px; font-size: 11.5px; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-music-top { display: flex; gap: 14px; align-items: center; }
+    .w-art { position: relative; width: 72px; height: 72px; flex: 0 0 72px; border-radius: 16px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #ff375f, #bf5af2); }
+    .w-art .material-symbols-outlined { font-size: 34px; }
+    .w-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+    .mw-music.has-art .w-art img { display: block; }
+    .w-music-text { min-width: 0; }
+    .w-title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-artist { margin-top: 2px; font-size: 12px; color: rgba(255,255,255,0.65); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .w-music-ctl { margin-top: auto; display: flex; justify-content: space-around; align-items: center; }
+    .w-music-ctl button { width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: #fff; font-size: 28px; cursor: pointer; transition: background 0.15s ease, transform 0.3s var(--spring-bounce); }
+    .w-music-ctl button:hover { background: rgba(255,255,255,0.12); }
+    .w-music-ctl button:active { transform: scale(0.85); }
+    .w-music-ctl .w-play { width: 54px; height: 54px; font-size: 36px; background: rgba(255,255,255,0.14); }
+    .mw-music.idle .w-music-ctl { opacity: 0.45; }
+    .w-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+    .w-head .material-symbols-outlined { font-size: 19px; color: var(--m3-accent-text); }
+    .w-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+    .w-file { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; font-size: 12.5px; transition: background 0.15s ease; min-width: 0; }
+    .w-file:hover { background: rgba(255,255,255,0.1); }
+    .w-file .material-symbols-outlined { font-size: 18px; color: var(--ft, #4da3ff); }
+    .w-file span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-empty { margin: auto; font-size: 12.5px; color: rgba(255,255,255,0.5); }
+    .w-note-title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .w-note-body { margin-top: 6px; font-size: 12.5px; line-height: 1.45; color: rgba(255,255,255,0.7); display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+    .mw-notes { background: rgba(60, 50, 20, 0.45); }
+    .mw-notes .w-head .material-symbols-outlined { color: #ffd60a; }
+    .w-rows { display: flex; flex-direction: column; gap: 8px; }
+    .w-row { display: flex; align-items: center; gap: 12px; font-size: 13px; min-width: 0; }
+    .w-row .material-symbols-outlined { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 17px; background: rgba(255,255,255,0.1); }
+    .w-row span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Editing: rims, remove badges, the gallery sheet */
+    body.widget-edit .mw-widget:not(.ws-preview .mw-widget) { box-shadow: 0 12px 34px rgba(0,0,0,0.3), inset 0 0 0 2px rgba(255,255,255,0.35); cursor: grab; touch-action: none; }
+    body.widget-edit .mw-widget > *:not(.w-remove) { pointer-events: none; }
+    .mw-widget.w-dragging { z-index: 5; cursor: grabbing !important; scale: 1.04; transition: scale 0.25s var(--spring-bounce); box-shadow: 0 24px 50px rgba(0,0,0,0.45), inset 0 0 0 2px rgba(255,255,255,0.5) !important; }
+    @keyframes wBadgeIn { from { transform: scale(0); } to { transform: none; } }
+    .w-remove { position: absolute; top: 10px; left: 10px; width: 26px; height: 26px; border: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0; background: rgba(240,240,245,0.95); color: #1b1f27; font-size: 18px; cursor: pointer; z-index: 3; animation: wBadgeIn 0.4s var(--spring-bounce) backwards; box-shadow: 0 3px 8px rgba(0,0,0,0.35); }
+    .w-remove:hover { background: #ff453a; color: #fff; }
+    body.widget-edit-desktop #desktopWidgets { z-index: 2147479000; }
+    #widgetSheet { position: fixed; left: 50%; bottom: 0; z-index: 2147480010; width: min(1180px, calc(100vw - 32px)); margin-left: max(calc(-590px), calc(-50vw + 16px)); box-sizing: border-box; padding: 18px 22px 26px; border-radius: 30px 30px 0 0; color: #fff; font-family: 'Poppins', sans-serif;
+      background: rgba(24, 28, 38, 0.72); -webkit-backdrop-filter: blur(40px) saturate(200%); backdrop-filter: blur(40px) saturate(200%); box-shadow: 0 -20px 60px rgba(0,0,0,0.45);
+      transform: translateY(105%); visibility: hidden; transition: transform 0.36s var(--sheet), visibility 0s linear 0.36s; }
+    #widgetSheet.open { transform: none; visibility: visible; transition: transform 0.55s var(--sheet), visibility 0s; }
+    .ws-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .ws-title { font-size: 19px; font-weight: 600; }
+    .ws-hint { flex: 1; font-size: 12.5px; color: rgba(255,255,255,0.55); }
+    #widgetSheetDone { padding: 8px 20px; border: 0; border-radius: 18px; background: var(--m3-accent-active); color: var(--m3-accent-on-active); font: 600 13px 'Poppins', sans-serif; cursor: pointer; }
+    .ws-row { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+    .ws-card { flex: 0 0 176px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    #widgetSheet.open .ws-card { animation: wsCardIn 0.55s var(--spring) backwards; animation-delay: calc(var(--i) * 35ms + 120ms); }
+    @keyframes wsCardIn { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .ws-preview { width: 176px; height: 132px; overflow: hidden; border-radius: 18px; pointer-events: none; }
+    .ws-preview .mw-widget { width: 286px; height: 214px; transform: scale(0.615); transform-origin: 0 0; -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(255,255,255,0.1); }
+    .ws-name { font-size: 12.5px; font-weight: 500; }
+    .ws-add { padding: 5px 16px; border: 0; border-radius: 14px; background: rgba(255,255,255,0.16); color: #fff; font: 500 12px 'Poppins', sans-serif; cursor: pointer; transition: background 0.15s ease; }
+    .ws-add:hover:not(:disabled) { background: var(--m3-accent-active); color: var(--m3-accent-on-active); }
+    .ws-add:disabled { opacity: 0.5; cursor: default; }
   </style>
 <script src="/desktop/assets/mariowos-dialogs.js"></script>
 <script src="/desktop/assets/external-consent.js"></script>
@@ -978,10 +1262,12 @@ Questions? https://discord.gg/YDVxw6jfbH
 </head>
 
 <body>
+<script>document.body.classList.add('desk-booting');</script>
   <div id="kernel-panic"></div>
 
   <div id="desktop-wallpaper"></div>
   <div id="desktop-icons"></div>
+  <div id="desktopWidgets"></div>
   
   <div class="status-bar">
     <div class="status-bar-bg"></div>
@@ -1051,6 +1337,7 @@ Questions? https://discord.gg/YDVxw6jfbH
 
       <div class="btn-wrapper">
         <button class="system-tray-btn tray-group" id="notificationsBtn" type="button">
+          <span class="tray-privacy" id="trayPrivacy" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.800l7.300 2.800c.5.2.8.6.8 1.100v5c0 4.700-3.200 8.400-8.100 10-4.900-1.600-8.100-5.300-8.100-10v-5c0-.5.3-.9.8-1.100z"/><path class="tp-tick" d="M8.500 12.300l2.500 2.500 4.600-4.800"/></svg></span>
           <span class="material-symbols-outlined" id="trayWifiIcon">wifi</span>
           <span class="material-symbols-outlined" id="volumeIcon">volume_up</span>
           <span class="tray-battery" id="batteryBtn" hidden>
@@ -1149,9 +1436,9 @@ Questions? https://discord.gg/YDVxw6jfbH
               <div class="hmos-icon-bg"><svg class="qsi" viewBox="0 0 24 24" aria-hidden="true"><g class="qsi-plane"><path class="qsi-fill" d="M21.500 15.800v-1.900l-8.100-5.100V3.700a1.400 1.400 0 0 0-2.800 0v5.100l-8.100 5.100v1.900l8.100-2.500v5.400l-2.100 1.500v1.500l3.500-1 3.500 1v-1.500l-2.100-1.500v-5.400z"/></g></svg></div>
               <span class="hmos-label" data-i18n="desktop.qs.airplane">Airplane mode</span>
             </div>
-            <div class="hmos-circle-toggle inactive" id="tileMute" onclick="toggleMute()">
-              <div class="hmos-icon-bg"><span class="material-symbols-outlined">volume_off</span></div>
-              <span class="hmos-label" data-i18n="desktop.cp.mute">Mute</span>
+            <div class="hmos-circle-toggle inactive" id="tilePrivacy" onclick="togglePrivacyMode()">
+              <div class="hmos-icon-bg"><svg class="qsi" viewBox="0 0 24 24" aria-hidden="true"><path class="qsi-shield" pathLength="1" d="M12 2.8l7.300 2.800c.5.2.8.6.8 1.100v5c0 4.700-3.200 8.400-8.100 10-4.900-1.600-8.100-5.300-8.100-10v-5c0-.5.3-.9.8-1.100z"/><path class="qsi-tick" pathLength="1" d="M8.500 12.300l2.500 2.500 4.600-4.800"/><path class="qsi-slash" pathLength="1" d="M4 3.5 20 20"/></svg></div>
+              <span class="hmos-label" data-i18n="desktop.privacy.title">Privacy mode</span>
             </div>
             <div class="hmos-circle-toggle inactive" id="tileShowDesktop" onclick="closeAllPanels(); showDesktopToggle()">
               <div class="hmos-icon-bg"><span class="material-symbols-outlined">desktop_windows</span></div>
@@ -1160,6 +1447,10 @@ Questions? https://discord.gg/YDVxw6jfbH
             <div class="hmos-circle-toggle inactive" id="tileTaskView" onclick="closeAllPanels(); openTaskView()">
               <div class="hmos-icon-bg"><span class="material-symbols-outlined">view_carousel</span></div>
               <span class="hmos-label" data-i18n="desktop.taskview.title">Task view</span>
+            </div>
+            <div class="hmos-circle-toggle inactive" id="tileTablet" onclick="closeAllPanels(); toggleTabletMode()">
+              <div class="hmos-icon-bg"><span class="material-symbols-outlined">tablet_android</span></div>
+              <span class="hmos-label" data-i18n="desktop.tablet.mode">Tablet mode</span>
             </div>
           </div>
         </div>
@@ -1201,7 +1492,22 @@ Questions? https://discord.gg/YDVxw6jfbH
     </div>
   </div>
 
-  <div id="taskView" aria-hidden="true"><div class="tv-empty" data-i18n="desktop.taskview.empty">No open windows</div></div>
+  <div id="winSwitcher" aria-hidden="true"><div class="wsw-panel" role="listbox" aria-label="Windows" data-i18n-aria-label="desktop.switcher.title"></div></div>
+  <div id="taskView" aria-hidden="true"><div class="tv-empty" data-i18n="desktop.taskview.empty">No open windows</div><button class="material-symbols-outlined" id="tvClearAll" type="button" title="Clear all" data-i18n-title="desktop.taskview.clear-all">delete_sweep</button></div>
+
+  <!-- Tablet mode (see "Tablet mode" in the script) -->
+  <div id="tabletHome" aria-hidden="true"><div class="th-grid" id="tabletGrid"></div></div>
+  <div id="tabletStatus">
+    <button type="button" id="tabletStatusLeft" title="Notifications" data-i18n-title="desktop.nc.title"><span id="tsTime"></span><span id="tsDate"></span></button>
+    <span class="ts-gap"></span>
+    <button type="button" id="tabletStatusRight" title="Control Panel" data-i18n-title="desktop.cp.title"><span class="material-symbols-outlined" id="tsWifi">wifi</span><span class="material-symbols-outlined" id="tsVolume">volume_up</span><span class="ts-battery" id="tsBattery"></span></button>
+  </div>
+  <div id="tabletDock"></div>
+  <div id="widgetSheet" aria-hidden="true">
+    <div class="ws-head"><span class="ws-title" data-i18n="desktop.widget.edit">Widgets</span><span class="ws-hint" data-i18n="desktop.widget.hint">Add one below, drag to move, tap − to remove</span><button type="button" id="widgetSheetDone" data-i18n="desktop.cp.done">Done</button></div>
+    <div class="ws-row" id="widgetSheetRow"></div>
+  </div>
+  <div id="tabletHomeBar" title="Home" data-i18n-title="desktop.tablet.home"><span></span></div>
 
   <!-- Hidden-on-open Lockscreen Overlay (uses the one in lockscreen folder) -->
   <div id="lockscreenContainer" class="lockscreen-overlay" aria-hidden="true">
@@ -1223,6 +1529,44 @@ Questions? https://discord.gg/YDVxw6jfbH
 
   <div id="toast-container"></div>
   <div id="nightLightOverlay"></div>
+  <!-- Privacy mode's shield (see "Privacy mode" in the script) -->
+  <div id="privacyShield" aria-hidden="true">
+    <div class="ps-veil"></div>
+    <canvas class="ps-glitter"></canvas>
+    <div class="ps-center">
+      <div class="ps-ring"></div>
+      <div class="ps-fly">
+        <div class="ps-glass"></div>
+        <svg class="ps-rim" viewBox="12 6 96 126" preserveAspectRatio="none">
+          <path class="ps-rim-red" d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/>
+          <path class="ps-rim-blue" d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/>
+          <path class="ps-rim-light" d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/>
+          <path class="ps-rim-edge" d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/>
+          <g clip-path="url(#psClip)"><g transform="rotate(22 60 70)"><rect class="ps-sheen" x="38" y="-40" width="30" height="220" fill="url(#psSheenFill)"/></g></g>
+          <ellipse class="ps-glint" cx="38" cy="24" rx="15" ry="4.500" transform="rotate(-22 38 24)"/>
+        </svg>
+        <svg class="ps-solid" viewBox="12 6 96 126" preserveAspectRatio="none">
+          <path class="ps-body" d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/>
+          <path class="ps-check" d="M40 70l14 14 27-28"/>
+        </svg>
+      </div>
+    </div>
+    <svg class="ps-defs" width="0" height="0" aria-hidden="true">
+      <defs>
+        <linearGradient id="psFill" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#7fe0ff"/><stop offset="0.55" stop-color="#3f8dff"/><stop offset="1" stop-color="#2a55e8"/></linearGradient>
+        <linearGradient id="psSheenFill" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.3"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+        <linearGradient id="psRimLight" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.95"/><stop offset="0.35" stop-color="#fff" stop-opacity="0.1"/><stop offset="0.75" stop-color="#fff" stop-opacity="0.05"/><stop offset="1" stop-color="#fff" stop-opacity="0.55"/></linearGradient>
+        <radialGradient id="psGlintFill"><stop offset="0" stop-color="#fff" stop-opacity="0.95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+        <clipPath id="psClip"><path d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/></clipPath>
+        <clipPath id="psGlassClip" clipPathUnits="objectBoundingBox"><path transform="scale(0.0104167 0.0079365) translate(-12 -6)" d="M60 6l44 16.500c2.400.9 4 3.200 4 5.800V60c0 34-19.500 59.500-48 72C31.500 119.500 12 94 12 60V28.300c0-2.600 1.600-4.900 4-5.800z"/></clipPath>
+        <!-- The glass: everything behind the shield bends outward toward its rim, like a thick lens. -->
+        <filter id="psLens" x="0" y="0" width="100%" height="100%" primitiveUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feImage id="psLensMap" x="0" y="0" width="300" height="394" preserveAspectRatio="none" result="map"/>
+          <feDisplacementMap id="psLensDisp" in="SourceGraphic" in2="map" scale="60" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
+  </div>
   <div id="devicePopup" role="status" aria-live="polite">
     <span class="material-symbols-outlined" id="devicePopupClose" onclick="closeDevicePopup()">close</span>
     <img id="devicePopupArt" alt="">
@@ -1241,6 +1585,7 @@ Questions? https://discord.gg/YDVxw6jfbH
     <a onclick="openPopup('popup8')"><div class="dropdown-item"><span class="material-symbols-outlined" style="font-size:18px;">terminal</span> <span data-i18n="desktop.menu.open-terminal">Open Terminal</span></div></a>
     <a onclick="openPopup('popup7')"><div class="dropdown-item"><span class="material-symbols-outlined" style="font-size:18px;">store</span> <span data-i18n="desktop.menu.app-store">App Store</span></div></a>
     <div style="height:1px; background:rgba(255,255,255,0.1); margin: 4px 0;"></div>
+    <a onclick="document.getElementById('desktopContextMenu').classList.remove('open'); startWidgetEdit('desktop')"><div class="dropdown-item"><span class="material-symbols-outlined" style="font-size:18px;">widgets</span> <span data-i18n="desktop.widget.edit">Widgets</span></div></a>
     <a onclick="document.querySelector('#popup1 iframe').src = '/desktop/apps/settings/index.html#wallpaper'; openPopup('popup1');"><div class="dropdown-item"><span class="material-symbols-outlined" style="font-size:18px;">wallpaper</span> <span data-i18n="desktop.menu.change-wallpaper">Change wallpaper</span></div></a>
     <a onclick="openPopup('popup1')"><div class="dropdown-item"><span class="material-symbols-outlined" style="font-size:18px;">settings</span> <span data-i18n="desktop.menu.system-settings">System settings</span></div></a>
   </div>
@@ -1792,6 +2137,7 @@ Questions? https://discord.gg/YDVxw6jfbH
         return btn;
       }));
       document.querySelector('#amApps .am-more').hidden = apps.length <= 12;
+      if (document.body.classList.contains('tablet-mode')) renderTabletHome();
     }
 
     // --- App shortcuts on the desktop: /home/Desktop/<name>.mwapp holding {"appId": ...}. ---
@@ -1958,14 +2304,6 @@ Questions? https://discord.gg/YDVxw6jfbH
       input.parentElement.classList.toggle('full', fill > 0.86);
     }
 
-    let volumeBeforeMute = null;
-    function toggleMute() {
-      const slider = document.getElementById('volumeSlider'), current = Number(slider.value);
-      if (current) volumeBeforeMute = current;
-      slider.value = current ? 0 : (volumeBeforeMute || 50);
-      slider.dispatchEvent(new Event('input')); slider.dispatchEvent(new Event('change'));
-    }
-
     // --- Task view: the windows themselves shrink into a grid over the blurred desktop, still
     // live, and go back where they were when one is picked. Only their transform moves, on a
     // spring, from wherever it is right now, so it can be reversed halfway and never drops a frame.
@@ -1993,8 +2331,16 @@ Questions? https://discord.gg/YDVxw6jfbH
     function layoutTaskView(rects) {
       // Nothing open: only the blurred desktop and its message.
       if (!rects.length) return [];
+      // Tablet recents: every app is full screen, so the cards are one row of equal size.
+      if (tabletAppsOn()) {
+        const gap = 36, n = rects.length, w0 = rects[0].width, h0 = rects[0].height;
+        const s = Math.max(0.2, Math.min(0.5, (innerHeight * 0.58) / h0, (innerWidth - 140 - gap * (n - 1)) / (w0 * n)));
+        let x = Math.max(70, (innerWidth - (n * w0 * s + gap * (n - 1))) / 2);
+        const y = (innerHeight - h0 * s) / 2 + 6;
+        return rects.map(r => { const out = { x, y, w: r.width * s, h: r.height * s, s }; x += r.width * s + gap; return out; });
+      }
       const W = window.innerWidth, H = window.innerHeight - TASKBAR_H;
-      const padX = 64, padTop = 56, padBottom = 36, gap = 44;
+      const padX = 64, padTop = 56, padBottom = 96, gap = 44;
       const areaW = W - padX * 2, areaH = H - padTop - padBottom, n = rects.length;
       let best = null;
       for (let rows = 1; rows <= n; rows++) {
@@ -2077,6 +2423,7 @@ Questions? https://discord.gg/YDVxw6jfbH
         rectAnimations.get(el)?.finish();
         el.querySelector('iframe')?.classList.remove('throttled-frame');
         if (el.tvOrigin === undefined) el.tvOrigin = el.style.transformOrigin;
+        if (tabletAppsOn()) el.style.borderRadius = TABLET_MOVING_RADIUS;
         return { el, revived: !!el.tvRevived, fresh: hidden, rect: { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } };
       });
       tv.classList.toggle('empty', !taskViewItems.length);
@@ -2110,9 +2457,16 @@ Questions? https://discord.gg/YDVxw6jfbH
       const picked = taskViewItems[pick];
       if (picked) { picked.el.tvRevived = false; picked.revived = false; }
       const items = taskViewItems;
+      // Tablet: only the picked app comes back, full screen; the others stay in recents.
+      const tablet = tabletAppsOn();
+      if (tablet) { items.forEach(it => { if (it !== picked) it.revived = true; }); setTabletHome(!picked, 480); }
       const anims = items.map(it => {
         const from = currentTransform(it.el);
         if (!it.revived) return playTaskViewMove(it.el, from, 'matrix(1, 0, 0, 1, 0, 0)', 480);
+        if (tablet) {
+          const t = it.target || { x: 0, y: 0, w: it.rect.width, h: it.rect.height, s: 1 };
+          return playTaskViewMove(it.el, from, `matrix(${t.s * 0.9}, 0, 0, ${t.s * 0.9}, ${t.x + t.w * 0.05 - it.rect.left}, ${t.y + t.h * 0.05 - it.rect.top})`, 300, { from: { opacity: 1 }, to: { opacity: 0 } });
+        }
         // Back into the taskbar, the way minimizing goes.
         const dock = document.querySelector(`.dock-icon[data-popup="${CSS.escape(it.el.id)}"]`)?.getBoundingClientRect();
         const s = 0.08, tx = dock ? dock.left + dock.width / 2 - it.rect.width * s / 2 : it.target.x, ty = dock ? dock.top - it.rect.height * s / 2 : window.innerHeight;
@@ -2128,6 +2482,7 @@ Questions? https://discord.gg/YDVxw6jfbH
       items.forEach((it, i) => anims[i].finished.then(() => {
         if (gen !== taskViewGen) return;
         if (it.revived) { it.el.style.display = 'none'; it.el.classList.remove('active'); it.el.tvRevived = false; }
+        else if (tabletAppsOn()) it.el.style.borderRadius = '0px';
         anims[i].cancel();
         it.el.style.transformOrigin = it.el.tvOrigin || ''; delete it.el.tvOrigin;
       }).catch(() => {}));
@@ -2141,6 +2496,22 @@ Questions? https://discord.gg/YDVxw6jfbH
     }
 
     function toggleTaskView() { if (taskViewOpen) closeTaskView(); else openTaskView(); }
+
+    // Clear all: every card flies up, one after the other, and the apps close.
+    function clearTaskView() {
+      const items = taskViewItems.slice();
+      items.forEach((it, i) => {
+        it.el.animate([{ translate: '0 0', opacity: 1 }, { translate: `0 ${-innerHeight * 0.7}px`, opacity: 0 }], { duration: 280, delay: i * 50, easing: 'cubic-bezier(0.3, 0, 0.8, 0.2)', fill: 'forwards' });
+        if (it.label) it.label.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, delay: i * 50, fill: 'forwards' });
+      });
+      setTimeout(() => {
+        items.forEach(it => { it.el.tvRevived = false; closePopup(it.el.id); });
+        taskViewItems = [];
+        document.getElementById('taskView').classList.add('empty');
+        closeTaskView();
+        setTimeout(() => items.forEach(it => { it.el.getAnimations().forEach(a => { if (!(a instanceof CSSAnimation)) a.cancel(); }); it.el.style.transformOrigin = it.el.tvOrigin || ''; delete it.el.tvOrigin; }), 400);
+      }, 280 + items.length * 50);
+    }
 
     // Closing a window from the overview: it fades where it is, the rest close the gap.
     function closeTaskViewWindow(index) {
@@ -2176,9 +2547,36 @@ Questions? https://discord.gg/YDVxw6jfbH
         if (e.target.closest('.status-bar')) { if (!e.target.closest('#taskViewBtn')) closeTaskView(); return; }
         e.preventDefault(); e.stopPropagation();
         if (!taskViewOpen) return;
+        if (e.target.closest('#tvClearAll')) { clearTaskView(); return; }
         const close = e.target.closest('.tv-close');
         if (close) { closeTaskViewWindow(Number(close.dataset.index)); return; }
-        closeTaskView(taskViewIndexAt(e.target));
+        const index = taskViewIndexAt(e.target), it = taskViewItems[index];
+        if (!it || !e.target.closest('.popup')) { closeTaskView(index); return; }
+        // A card follows the pointer up; flung or pulled far enough it closes, a tap opens it.
+        const startY = e.clientY;
+        let dy = 0, raf = 0;
+        const draw = () => { raf = 0; it.el.style.translate = `0 ${dy}px`; if (it.label) { it.label.style.translate = `0 ${dy}px`; it.label.style.opacity = String(Math.max(0, 1 + dy / 160)); } };
+        const move = ev => { dy = Math.min(0, ev.clientY - startY); if (!raf) raf = requestAnimationFrame(draw); };
+        const up = () => {
+          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+          cancelAnimationFrame(raf);
+          const reset = () => { it.el.style.translate = ''; if (it.label) { it.label.style.translate = ''; it.label.style.opacity = ''; } };
+          if (dy > -8) { reset(); if (taskViewOpen) closeTaskView(taskViewItems.indexOf(it)); return; }
+          if (dy < -110) {
+            const fly = it.el.animate([{ translate: `0 ${dy}px`, opacity: 1 }, { translate: `0 ${-innerHeight * 0.75}px`, opacity: 0 }], { duration: 260, easing: 'cubic-bezier(0.3, 0, 0.8, 0.2)', fill: 'forwards' });
+            if (it.label) it.label.style.opacity = '0';
+            fly.finished.then(() => {
+              it.el.style.translate = '';
+              const at = taskViewItems.indexOf(it);
+              if (at >= 0) closeTaskViewWindow(at);
+              setTimeout(() => fly.cancel(), 400);
+            }).catch(() => {});
+            return;
+          }
+          it.el.animate([{ translate: `0 ${dy}px` }, { translate: '0px 0px' }], { duration: 360, easing: TV_EASE });
+          reset();
+        };
+        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
       }, true);
       document.addEventListener('click', e => {
         if (document.body.classList.contains('task-view') && !e.target.closest('.status-bar')) { e.preventDefault(); e.stopPropagation(); }
@@ -2189,6 +2587,843 @@ Questions? https://discord.gg/YDVxw6jfbH
         const targets = layoutTaskView(taskViewItems.map(it => it.rect));
         taskViewItems.forEach((it, i) => { const from = currentTransform(it.el); it.target = targets[i]; playTaskViewMove(it.el, from, taskViewTransform(it), 400); placeTaskViewLabel(it, i); });
       });
+    })();
+
+    // ═══ Tablet mode: a full-screen shell in the style of HarmonyOS NEXT on tablets ═══
+    // The same apps, full screen. Opening one grows it out of its icon while the home screen
+    // sinks back and the dock drops away, all on one spring (TV_EASE), and going home plays
+    // that in reverse into the icon. Everything reads where it is now before it moves, so any
+    // of it can be reversed halfway. The home bar drags the app home, or into recents if held.
+    const TABLET_TOP = 30;
+    const TABLET_KEY = (window.mariowOSUserKey || (k => k))('tabletMode');
+    const TABLET_IDENTITY = 'matrix(1, 0, 0, 1, 0, 0)';
+    const TABLET_MOVING_RADIUS = '28px';
+    let tabletMode = false, tabletLaunchFrom = null, tabletModeGen = 0;
+    const tabletAnims = new WeakMap();
+    const tabletEls = () => ({ home: document.getElementById('tabletHome'), dock: document.getElementById('tabletDock'), status: document.getElementById('tabletStatus'), bar: document.getElementById('tabletHomeBar') });
+    const tabletAppsOn = () => document.body.classList.contains('tablet-apps');
+    const isTabletApp = p => !!p && p.classList.contains('popup') && !p.id.startsWith('dialog_');
+
+    function tabletForeground() {
+      return [...document.querySelectorAll('.popup.active')]
+        .filter(p => isTabletApp(p) && !p.classList.contains('closing') && p.style.display !== 'none')
+        .sort((a, b) => (parseInt(b.style.zIndex) || 0) - (parseInt(a.style.zIndex) || 0))[0] || null;
+    }
+
+    function tabletAnimate(el, keyframes, options) {
+      tabletAnims.get(el)?.cancel();
+      const anim = el.animate(keyframes, { easing: TV_EASE, fill: 'forwards', ...options });
+      tabletAnims.set(el, anim);
+      return anim;
+    }
+
+    // Where something sits at rest, whatever its layers are animating (offsets ignore transforms).
+    function tabletRestRect(el, root) {
+      let x = 0, y = 0, node = el;
+      while (node && node !== root) { x += node.offsetLeft; y += node.offsetTop; node = node.offsetParent; }
+      if (node !== root) return null;
+      return { left: x + root.offsetLeft, top: y + root.offsetTop, width: el.offsetWidth, height: el.offsetHeight };
+    }
+    function tabletIconRect(appId) {
+      const { home, dock } = tabletEls();
+      const sel = `[data-popup="${CSS.escape(String(appId))}"]`;
+      const onHome = home.querySelector(`.th-app${sel} .th-icon`);
+      if (onHome) return tabletRestRect(onHome, home);
+      const inDock = dock.querySelector(`.td-app${sel} .td-icon`);
+      return inDock ? tabletRestRect(inDock, dock) : null;
+    }
+    const tabletCenterRect = () => ({ left: innerWidth / 2 - 40, top: innerHeight / 2 - 40, width: 80, height: 80 });
+    // The window's transform when it is drawn over a given screen rectangle (origin at its corner).
+    const tabletRectMatrix = rect => `matrix(${rect.width / innerWidth}, 0, 0, ${rect.height / (innerHeight - TABLET_TOP)}, ${rect.left}, ${rect.top - TABLET_TOP})`;
+
+    // The home screen comes forward (shown) or sinks behind the app; the dock follows.
+    function setTabletHome(shown, ms = 480, origin = null) {
+      const { home, dock } = tabletEls();
+      const homeFrom = currentTransform(home), homeOpacity = getComputedStyle(home).opacity, dockFrom = currentTransform(dock);
+      tabletAnimate(home, [{ transform: homeFrom, opacity: homeOpacity }, { transform: shown ? TABLET_IDENTITY : 'matrix(0.92, 0, 0, 0.92, 0, 0)', opacity: shown ? 1 : 0 }], { duration: ms });
+      tabletAnimate(dock, [{ transform: dockFrom }, { transform: shown ? 'translateY(0px)' : 'translateY(150px)' }], { duration: ms });
+      tabletRipple(shown, origin || tabletCenterRect(), ms);
+      // Depth: the wallpaper leans in behind an open app and settles back with the home screen.
+      const wall = document.getElementById('desktop-wallpaper'), base = wall.style.transform || 'none';
+      tabletAnimate(wall, [{ transform: currentTransform(wall) }, { transform: shown ? base : `${base === 'none' ? '' : base} scale(1.05)`.trim() }], { duration: ms + 80 });
+      if (shown) dock.querySelectorAll('.td-app').forEach((b, i) => {
+        const prev = tabletAnims.get(b), midway = prev?.playState === 'running';
+        const from = midway ? currentTransform(b) : 'translateY(26px)';
+        prev?.cancel();
+        tabletAnims.set(b, b.animate([{ transform: from }, { transform: 'none' }], { duration: ms + 60, delay: midway ? 0 : 40 + i * 24, easing: TV_EASE, fill: 'backwards' }));
+      });
+      document.body.classList.toggle('tablet-app-open', !shown);
+    }
+
+    // The other icons make way from where an app opens, and settle back, nearest first, as it lands.
+    function tabletRipple(shown, origin, ms) {
+      const { home } = tabletEls();
+      const items = [...home.querySelectorAll('.th-widget, .th-app')];
+      const ox = origin.left + origin.width / 2, oy = origin.top + origin.height / 2;
+      const rects = items.map(el => tabletRestRect(el, home));
+      const dists = rects.map(r => r ? Math.hypot(r.left + r.width / 2 - ox, r.top + r.height / 2 - oy) : 0);
+      const far = Math.max(1, ...dists);
+      items.forEach((el, i) => {
+        const r = rects[i], d = dists[i];
+        if (!r) return;
+        const prev = tabletAnims.get(el), from = prev ? getComputedStyle(el).transform : 'none';
+        if (!shown && d < 6) return;
+        const push = d < 6 ? 0 : (10 + 22 * (1 - d / far)) / d;
+        const away = `translate(${(r.left + r.width / 2 - ox) * push}px, ${(r.top + r.height / 2 - oy) * push}px) scale(0.96)`;
+        prev?.cancel();
+        const anim = shown
+          ? el.animate([{ transform: from === 'none' ? away : from }, { transform: 'none' }], { duration: ms + 80, delay: (d / far) * 140, easing: TV_EASE, fill: 'backwards' })
+          : el.animate([{ transform: from }, { transform: away }], { duration: ms * 0.7, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'forwards' });
+        tabletAnims.set(el, anim);
+      });
+    }
+
+    function tabletCover(popup) {
+      let cover = popup.querySelector(':scope > .tablet-cover');
+      if (!cover) { cover = document.createElement('div'); cover.className = 'tablet-cover'; popup.appendChild(cover); }
+      return cover;
+    }
+
+    // The app's icon rides along: from where it was tapped, it grows and dissolves into the app.
+    const tabletFlies = new Map();
+    function tabletFlyIcon(appId, rect, back = false, ms = 380) {
+      const app = getAllApps().find(a => a.id === appId);
+      if (!app || !rect) return;
+      // One flying icon per app: if one is still in the air (the app was reopened on its way
+      // home, or sent home while opening), it turns around from where it is.
+      let fly = tabletFlies.get(appId), from = null;
+      if (fly?.isConnected) {
+        from = { transform: currentTransform(fly), opacity: getComputedStyle(fly).opacity };
+        fly.getAnimations().forEach(a => a.cancel());
+      } else {
+        fly = document.createElement('div');
+        fly.className = 'tablet-fly';
+        fly.innerHTML = renderOsIcon(app.icon, 'dock');
+        document.body.appendChild(fly);
+        tabletFlies.set(appId, fly);
+      }
+      fly.style.cssText = `left:0;top:0;width:${rect.width}px;height:${rect.height}px;`;
+      const size = Math.min(innerWidth, innerHeight) * 0.22, s = size / rect.width;
+      const atIcon = { transform: `translate(${rect.left}px, ${rect.top}px) scale(1)`, opacity: 1 };
+      const atCentre = { transform: `translate(${innerWidth / 2 - size / 2}px, ${innerHeight / 2 - size / 2}px) scale(${s})`, opacity: 0 };
+      // Going home it appears out of the shrinking app and lands exactly on its icon.
+      const frames = from ? [from, back ? atIcon : atCentre] : back ? [atCentre, { ...atCentre, opacity: 0, offset: 0.2 }, atIcon] : [atIcon, atCentre];
+      const anim = fly.animate(frames, { duration: ms, easing: TV_EASE, fill: 'forwards' });
+      anim.finished.then(() => { if (tabletFlies.get(appId) === fly) tabletFlies.delete(appId); fly.remove(); }, () => {});
+    }
+
+    function tabletLaunch(appId, sourceEl) {
+      tabletLaunchFrom = sourceEl ? sourceEl.getBoundingClientRect() : null;
+      openPopup(appId);
+    }
+
+    // Called by openPopup for every app shown while in tablet mode.
+    function tabletShowApp(popup) {
+      const running = tabletAnims.get(popup)?.playState === 'running';
+      delete popup.dataset.tabletLeaving;
+      const rect = tabletLaunchFrom || tabletIconRect(popup.id) || tabletCenterRect();
+      tabletLaunchFrom = null;
+      popup.style.transformOrigin = '0 0';
+      // Corners stay one fixed radius while it moves: animating the radius would repaint the
+      // whole window every frame. While it is small, the flying icon covers it.
+      popup.style.borderRadius = TABLET_MOVING_RADIUS;
+      const from = running ? currentTransform(popup) : tabletRectMatrix(rect);
+      const cover = tabletCover(popup);
+      const coverFrom = running ? getComputedStyle(cover).opacity : 1;
+      tabletAnims.get(cover)?.cancel();
+      const coverAnim = cover.animate([{ opacity: coverFrom }, { opacity: 0 }], { duration: 300, easing: 'cubic-bezier(0.3, 0, 0.6, 1)', fill: 'forwards' });
+      tabletAnims.set(cover, coverAnim);
+      if (!running || tabletFlies.has(popup.id)) tabletFlyIcon(popup.id, rect);
+      const opacityFrom = running ? getComputedStyle(popup).opacity : 1;
+      const anim = tabletAnimate(popup, [{ transform: from, opacity: opacityFrom }, { transform: TABLET_IDENTITY, opacity: 1 }], { duration: 560 });
+      setTabletHome(false, 520, rect);
+      anim.finished.then(() => {
+        if (tabletAnims.get(popup) !== anim) return;
+        anim.cancel();
+        popup.style.transformOrigin = '';
+        popup.style.borderRadius = '0px';
+        // Only one app is in front: the others step back into recents. (If another app was
+        // opened over this one meanwhile, that one does it when it lands.)
+        if (popup !== tabletForeground()) return;
+        document.querySelectorAll('.popup.active').forEach(other => { if (other !== popup && isTabletApp(other) && !other.classList.contains('closing')) tabletHideWindow(other); });
+      }).catch(() => {});
+    }
+
+    function tabletHideWindow(popup) {
+      tabletAnims.get(popup)?.cancel();
+      popup.style.display = 'none';
+      popup.classList.remove('active', 'focused');
+      popup.style.transformOrigin = '';
+    }
+
+    // Back into its icon, with the home screen coming forward at the same time.
+    function tabletGoHome(ms = 500) {
+      const popup = tabletForeground();
+      if (!popup) { if (document.body.classList.contains('tablet-app-open')) setTabletHome(true, ms); return; }
+      if (popup.dataset.tabletLeaving) return;
+      popup.dataset.tabletLeaving = '1';
+      const rect = tabletIconRect(popup.id) || tabletCenterRect();
+      const from = currentTransform(popup);
+      popup.style.transformOrigin = '0 0';
+      popup.style.borderRadius = TABLET_MOVING_RADIUS;
+      tabletFlyIcon(popup.id, rect, true, ms);
+      const cover = tabletCover(popup), coverFrom = getComputedStyle(cover).opacity;
+      tabletAnims.get(cover)?.cancel();
+      const coverAnim = cover.animate([{ opacity: coverFrom }, { opacity: coverFrom, offset: 0.3 }, { opacity: 1 }], { duration: ms * 0.8, easing: 'ease-in', fill: 'forwards' });
+      tabletAnims.set(cover, coverAnim);
+      const anim = tabletAnimate(popup, [{ transform: from, opacity: 1 }, { transform: tabletRectMatrix(rect), opacity: 0 }], { duration: ms });
+      setTabletHome(true, ms, rect);
+      anim.finished.then(() => {
+        if (tabletAnims.get(popup) !== anim) return;
+        delete popup.dataset.tabletLeaving;
+        tabletHideWindow(popup);
+        coverAnim.cancel();
+        updateContextBar();
+      }).catch(() => {});
+    }
+
+    // --- Home screen, dock and status bar ---
+    function renderTabletHome() {
+      const grid = document.getElementById('tabletGrid');
+      // The account's widgets first (see "Widgets"), then every app.
+      const widgets = loadWidgets('tablet').map(w => { const el = buildWidget(w.type); el.classList.add('th-widget'); return el; });
+      const apps = getAllApps().map(app => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'th-app' + (runningApps.has(app.id) ? ' running' : ''); b.dataset.popup = app.id;
+        const icon = document.createElement('span'); icon.className = 'th-icon';
+        const tpl = document.createElement('template'); tpl.innerHTML = renderOsIcon(app.icon, 'dock'); icon.append(tpl.content);
+        const label = document.createElement('span'); label.className = 'th-label'; label.textContent = app.title == null ? '' : String(app.title);
+        b.append(icon, label);
+        b.addEventListener('click', () => tabletLaunch(app.id, icon));
+        return b;
+      });
+      grid.replaceChildren(...widgets, ...apps);
+      if (widgetEdit === 'tablet') widgets.forEach((el, i) => addWidgetBadge(el, i));
+      updateTabletClock();
+    }
+
+    function renderTabletDock() {
+      const dock = document.getElementById('tabletDock');
+      const allowed = getAllApps();
+      const find = id => allowed.find(a => a.id === id);
+      const pinned = pinnedApps.filter(find).slice(0, 8);
+      const recent = [...runningApps].filter(id => !pinned.includes(id) && find(id)).slice(-3);
+      const make = app => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'td-app' + (runningApps.has(app.id) ? ' running' : ''); b.dataset.popup = app.id; b.title = app.title;
+        const icon = document.createElement('span'); icon.className = 'td-icon';
+        const tpl = document.createElement('template'); tpl.innerHTML = renderOsIcon(app.icon, 'dock'); icon.append(tpl.content);
+        b.append(icon);
+        b.addEventListener('click', () => tabletLaunch(app.id, icon));
+        return b;
+      };
+      const recents = document.createElement('button');
+      recents.type = 'button'; recents.className = 'td-app td-recents'; recents.title = mariowOSI18n.t("desktop.tablet.recents", "Recent apps");
+      recents.innerHTML = '<span class="td-icon"><span class="material-symbols-outlined">view_carousel</span></span>';
+      recents.addEventListener('click', () => openTaskView());
+      const children = pinned.map(id => make(find(id)));
+      if (recent.length) { const sep = document.createElement('span'); sep.className = 'td-sep'; children.push(sep, ...recent.map(id => make(find(id)))); }
+      children.push(Object.assign(document.createElement('span'), { className: 'td-sep' }), recents);
+      dock.replaceChildren(...children);
+      document.querySelectorAll('#tabletGrid .th-app').forEach(b => b.classList.toggle('running', runningApps.has(b.dataset.popup)));
+    }
+
+    function updateTabletClock() {
+      if (!tabletMode) return;
+      const now = new Date(), locale = mariowOSI18n.locale || undefined;
+      const time = now.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+      const set = (id, text) => { const el = document.getElementById(id); if (el && el.textContent !== text) el.textContent = text; };
+      set('tsTime', time);
+      set('tsDate', now.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }));
+      // The tray's own icons tell what to show.
+      set('tsWifi', document.getElementById('trayWifiIcon')?.textContent || 'wifi');
+      set('tsVolume', document.getElementById('volumeIcon')?.textContent || 'volume_up');
+      const battery = document.getElementById('batteryBtn');
+      set('tsBattery', battery && !battery.hidden ? (document.getElementById('batteryPercent')?.textContent || '') : '');
+    }
+    setInterval(updateTabletClock, 1000);
+
+    // Hands a tap in the home-bar strip to whatever is under it in the app.
+    function tabletPassClick(x, y) {
+      const bar = document.getElementById('tabletHomeBar');
+      bar.style.pointerEvents = 'none';
+      let target = document.elementFromPoint(x, y);
+      bar.style.pointerEvents = '';
+      if (target?.tagName === 'IFRAME') {
+        try {
+          const r = target.getBoundingClientRect(), doc = target.contentDocument;
+          target = doc?.elementFromPoint(x - r.left, y - r.top) || null;
+        } catch (_) { target = null; }
+      }
+      if (!target || target.tagName === 'WEBVIEW') return;
+      if (typeof target.focus === 'function' && target.matches?.('input, textarea, select, [contenteditable]')) target.focus();
+      target.click?.();
+    }
+
+    (function setupTabletShell() {
+      // The status bar opens the notification drawer (left) and the Control Panel (right).
+      const open = (button, e) => { e.stopPropagation(); document.getElementById(button).click(); };
+      document.getElementById('tabletStatusLeft').addEventListener('click', e => open('clockBtn', e));
+      document.getElementById('tabletStatusRight').addEventListener('click', e => open('notificationsBtn', e));
+
+      // The home bar. Drag up from anywhere in its strip and the app follows the finger, letting
+      // go of the screen at once (it shrinks fastest at the start), while the home screen comes
+      // forward. Let go after even a short swipe or a light flick and it goes home; pause
+      // mid-swipe and the app settles into a recents card (you can see it is armed), so letting
+      // go there opens recents. Pulling back down cancels. A tap on the pill goes home, and a
+      // touchpad or wheel swipe over the strip does too.
+      const bar = document.getElementById('tabletHomeBar');
+      let wheelSum = 0, wheelAt = 0;
+      bar.addEventListener('wheel', e => {
+        e.preventDefault();
+        const now = performance.now();
+        if (now - wheelAt > 260) wheelSum = 0;
+        wheelAt = now;
+        wheelSum += Math.abs(e.deltaY);
+        // One trip per swipe: the sum stays spent until the touchpad goes quiet.
+        if (wheelSum > 40 && wheelSum < 1e6) { wheelSum = 1e9; if (tabletForeground()) tabletGoHome(); }
+      }, { passive: false });
+      bar.addEventListener('pointerdown', e => {
+        const popup = tabletForeground();
+        if (!popup || e.button !== 0 || popup.dataset.tabletLeaving) return;
+        e.preventDefault();
+        try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+        bar.classList.add('held');
+        const { home, dock } = tabletEls();
+        const W = innerWidth, H = innerHeight - TABLET_TOP;
+        const startX = e.clientX, startY = e.clientY, startT = performance.now();
+        let dx = 0, dy = 0, raf = 0, armed = false, armX = 0, armY = 0, holdTimer = 0, easeTimer = 0;
+        const samples = [[startT, 0]];
+        // Take every layer over from wherever its animation has it now: this can start halfway
+        // through the app opening, and nothing jumps.
+        const take = el => { const t = currentTransform(el), o = getComputedStyle(el).opacity; tabletAnims.get(el)?.cancel(); el.style.transform = t; el.style.opacity = o; };
+        take(popup); take(home); take(dock);
+        popup.style.transformOrigin = '0 0';
+        popup.style.borderRadius = TABLET_MOVING_RADIUS;
+        const layers = [popup, home, dock];
+        // Arming and disarming glide between the two poses instead of snapping.
+        const glide = () => {
+          clearTimeout(easeTimer);
+          layers.forEach(el => { el.style.transition = `transform 0.34s ${TV_EASE}, opacity 0.34s ease`; });
+          easeTimer = setTimeout(() => layers.forEach(el => { el.style.transition = ''; }), 340);
+        };
+        const frame = () => {
+          raf = 0;
+          const up = Math.max(0, dy);
+          const p = 1 - Math.exp(-up / 240);
+          if (armed) {
+            const s = 0.5;
+            popup.style.transform = `matrix(${s}, 0, 0, ${s}, ${W * (1 - s) / 2 + dx * 0.5}, ${H * (1 - s) / 2 - 10})`;
+            home.style.opacity = '0.35';
+            home.style.transform = 'matrix(0.94, 0, 0, 0.94, 0, 0)';
+            dock.style.transform = 'translateY(150px)';
+            return;
+          }
+          const s = 1 - 0.58 * p;
+          // The bottom centre of the app stays under the finger.
+          popup.style.transform = `matrix(${s}, 0, 0, ${s}, ${W * (1 - s) / 2 + dx * 0.8}, ${H * (1 - s) - up})`;
+          home.style.opacity = String(Math.min(1, p * 2.2));
+          home.style.transform = `matrix(${0.92 + 0.08 * p}, 0, 0, ${0.92 + 0.08 * p}, 0, 0)`;
+          dock.style.transform = `translateY(${150 * (1 - Math.min(1, p * 2))}px)`;
+        };
+        const arm = on => {
+          if (armed === on) return;
+          armed = on; armX = dx; armY = dy;
+          bar.classList.toggle('armed', on);
+          glide();
+          if (!raf) raf = requestAnimationFrame(frame);
+        };
+        const move = ev => {
+          const ndy = startY - ev.clientY, ndx = ev.clientX - startX;
+          const step = Math.hypot(ndx - dx, ndy - dy);
+          dy = ndy; dx = ndx;
+          const now = performance.now();
+          samples.push([now, dy]); while (samples.length > 2 && now - samples[0][0] > 90) samples.shift();
+          // Moving on (or back down) disarms; resting after a real swipe arms recents.
+          if (armed && (Math.hypot(dx - armX, dy - armY) > 36 || dy < 50)) arm(false);
+          if (step > 3) {
+            clearTimeout(holdTimer);
+            if (!armed && dy > 80) holdTimer = setTimeout(() => arm(true), 280);
+          }
+          if (!raf) raf = requestAnimationFrame(frame);
+        };
+        const release = () => {
+          bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', release); bar.removeEventListener('pointercancel', release);
+          bar.classList.remove('held', 'armed');
+          clearTimeout(holdTimer); clearTimeout(easeTimer);
+          cancelAnimationFrame(raf); raf = 0;
+          const now = performance.now();
+          const [t0, y0] = samples[0], velocity = (dy - y0) / Math.max(1, now - t0);
+          // Whatever happens next starts exactly where the layers are on screen right now.
+          layers.forEach(el => { const cs = getComputedStyle(el), t = cs.transform, o = cs.opacity; el.style.transition = ''; el.style.transform = t; el.style.opacity = o; });
+          const clear = () => layers.forEach(el => { el.style.transform = ''; el.style.opacity = ''; });
+          const pill = bar.querySelector('span').getBoundingClientRect();
+          const onPill = Math.abs(startX - (pill.left + pill.width / 2)) < pill.width / 2 + 48 && startY > pill.top - 30;
+          if (Math.abs(dy) < 10 && Math.abs(dx) < 10 && now - startT < 400) {
+            // A tap on the pill goes home; anywhere else in the strip it belongs to the app.
+            if (onPill) { tabletGoHome(); clear(); }
+            else {
+              // Hand the tap over first, while the layers are still where they were; then put
+              // everything back as it was (the home screen stays hidden behind the app).
+              tabletPassClick(startX, startY);
+              clear(); popup.style.transformOrigin = ''; popup.style.borderRadius = '0px';
+              setTabletHome(false, 1);
+            }
+          }
+          else if (armed) { openTaskView(); setTabletHome(true, 440); clear(); }
+          // Home after a short swipe or any light upward flick; a pull back down cancels.
+          else if (velocity > -0.2 && (dy > 24 || velocity > 0.18)) { tabletGoHome(); clear(); }
+          else {
+            const from = currentTransform(popup);
+            const anim = tabletAnimate(popup, [{ transform: from }, { transform: TABLET_IDENTITY }], { duration: 420 });
+            setTabletHome(false, 420); clear();
+            anim.finished.then(() => { if (tabletAnims.get(popup) === anim) { anim.cancel(); popup.style.transformOrigin = ''; popup.style.borderRadius = '0px'; } }).catch(() => {});
+          }
+        };
+        bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', release); bar.addEventListener('pointercancel', release);
+      });
+    })();
+
+    // --- Switching modes: both sides move at once ---
+    function tabletCascade(direction) {
+      const { home } = tabletEls();
+      const items = [...home.querySelectorAll('.th-widget, .th-app')];
+      const cx = innerWidth / 2, cy = innerHeight / 2;
+      const rects = items.map(el => el.getBoundingClientRect());
+      const far = Math.max(1, ...rects.map(r => Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy)));
+      items.forEach((el, i) => {
+        const r = rects[i], ox = (cx - (r.left + r.width / 2)) * 0.28, oy = (cy - (r.top + r.height / 2)) * 0.28;
+        const away = { opacity: 0, transform: `translate(${ox}px, ${oy}px) scale(0.6)` }, rest = { opacity: 1, transform: 'none' };
+        const d = Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy) / far;
+        el.animate(direction === 'in' ? [away, rest] : [rest, away], direction === 'in'
+          ? { duration: 640, delay: 90 + d * 200, easing: TV_EASE, fill: 'backwards' }
+          : { duration: 320, delay: (1 - d) * 90, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' });
+      });
+    }
+
+    function enterTabletMode(animate = true) {
+      if (tabletMode) return;
+      endWidgetEdit();
+      tabletMode = true;
+      const gen = ++tabletModeGen;
+      try { localStorage.setItem(TABLET_KEY, '1'); } catch (e) {}
+      closeAllPanels();
+      if (taskViewOpen) closeTaskView();
+      renderTabletHome(); renderTabletDock(); updateTabletControlTile();
+      const { home, dock, status } = tabletEls();
+      [home, dock].forEach(el => { tabletAnims.get(el)?.cancel(); el.style.transform = ''; el.style.opacity = ''; });
+      const windows = [...document.querySelectorAll('.popup.active')].filter(p => isTabletApp(p) && p.style.display !== 'none');
+      document.body.classList.add('tablet-mode');
+      document.body.classList.remove('tablet-app-open');
+      const finish = () => {
+        if (gen !== tabletModeGen) return;
+        windows.forEach(w => { w.getAnimations().forEach(a => a.cancel()); tabletHideWindow(w); w.style.borderRadius = ''; });
+        document.querySelectorAll('.popup:not([id^="dialog_"])').forEach(p => { p.style.borderRadius = ''; });
+        document.body.classList.add('tablet-apps', 'tablet-hide-desktop');
+        [document.getElementById('desktop-icons'), document.querySelector('.status-bar')].forEach(el => el.getAnimations().forEach(a => { if (a.id === 'tablet-switch') a.cancel(); }));
+        updateContextBar();
+      };
+      if (!animate) { finish(); return; }
+      // The desktop sinks away...
+      const out = { duration: 320, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards', id: 'tablet-switch' };
+      document.getElementById('desktop-icons').animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.92)' }], out);
+      document.querySelector('.status-bar').animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(70px)' }], out);
+      windows.forEach(w => w.animate([{ opacity: 1, transform: currentTransform(w) }, { opacity: 0, transform: 'scale(0.9)' }], { ...out, duration: 280 }));
+      // ...while the tablet arrives: icons from the centre outwards, the bars from the edges.
+      document.getElementById('desktop-wallpaper').animate([{ transform: 'scale(1.06)' }, { transform: 'none' }], { duration: 700, easing: TV_EASE });
+      tabletCascade('in');
+      status.animate([{ transform: 'translateY(-100%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 560, delay: 120, easing: TV_EASE, fill: 'backwards' });
+      tabletAnimate(dock, [{ transform: 'translateY(150px)' }, { transform: 'translateY(0px)' }], { duration: 620, delay: 160, fill: 'both' });
+      setTimeout(finish, 330);
+    }
+
+    function exitTabletMode(animate = true) {
+      if (!tabletMode) return;
+      endWidgetEdit();
+      tabletMode = false;
+      const gen = ++tabletModeGen;
+      try { localStorage.removeItem(TABLET_KEY); } catch (e) {}
+      closeAllPanels();
+      if (taskViewOpen) closeTaskView();
+      updateTabletControlTile();
+      const { home, dock, status } = tabletEls();
+      // The app in front goes back to the dock; the windows come back as windows.
+      const front = tabletForeground();
+      document.querySelectorAll('.popup').forEach(p => { tabletAnims.get(p)?.cancel(); p.style.transformOrigin = ''; p.style.borderRadius = p.classList.contains('maximized') ? '0px' : ''; });
+      if (front) tabletHideWindow(front);
+      document.body.classList.remove('tablet-apps', 'tablet-hide-desktop', 'tablet-app-open');
+      tabletAnims.get(document.getElementById('desktop-wallpaper'))?.cancel();
+      const finish = () => { if (gen !== tabletModeGen) return; document.body.classList.remove('tablet-mode'); [home, dock, status].forEach(el => { tabletAnims.get(el)?.cancel(); el.getAnimations().forEach(a => a.cancel()); el.style.transform = ''; el.style.opacity = ''; }); home.querySelectorAll('.th-widget, .th-app').forEach(el => el.getAnimations().forEach(a => a.cancel())); };
+      if (!animate) { finish(); return; }
+      const into = { duration: 600, easing: TV_EASE };
+      document.getElementById('desktop-icons').animate([{ opacity: 0, transform: 'scale(0.92)' }, { opacity: 1, transform: 'none' }], { ...into, delay: 120, fill: 'backwards' });
+      // Not the whole bar: fading or moving it would switch its glass's blur off until it stops.
+      deskTaskbarArrive(120);
+      tabletCascade('out');
+      tabletAnimate(home, [{ opacity: getComputedStyle(home).opacity }, { opacity: 0 }], { duration: 380, easing: 'ease-in' });
+      status.animate([{ transform: 'none', opacity: 1 }, { transform: 'translateY(-100%)', opacity: 0 }], { duration: 300, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' });
+      tabletAnimate(dock, [{ transform: currentTransform(dock) }, { transform: 'translateY(150px)' }], { duration: 320, easing: 'cubic-bezier(0.4, 0, 1, 1)' });
+      setTimeout(finish, 420);
+    }
+
+    function toggleTabletMode() { if (tabletMode) exitTabletMode(); else enterTabletMode(); }
+    function updateTabletControlTile() {
+      const tile = document.getElementById('tileTablet');
+      if (tile) tile.className = `hmos-circle-toggle ${tabletMode ? 'active' : 'inactive'}`;
+    }
+
+    // ═══ Widgets: the same live cards on the tablet home screen and on the desktop ═══
+    // Each account keeps its own (lib/users.js scopes the storage keys). Editing works the
+    // same in both places: a gallery slides up to add, a badge removes, dragging rearranges.
+    const WIDGET_INFO = {
+      clock: ['schedule', 'desktop.widget.clock', 'Clock'],
+      calendar: ['calendar_month', 'desktop.widget.calendar', 'Calendar'],
+      music: ['music_note', 'desktop.widget.music', 'Now playing'],
+      files: ['folder_open', 'desktop.widget.files', 'Recent files'],
+      notes: ['sticky_note_2', 'desktop.widget.notes', 'Notes'],
+      device: ['devices', 'desktop.widget.device', 'This device']
+    };
+    const widgetName = type => mariowOSI18n.t(WIDGET_INFO[type][1], WIDGET_INFO[type][2]);
+    const widgetKey = host => (window.mariowOSUserKey || (k => k))(host === 'tablet' ? 'mwWidgetsTablet' : 'mwWidgetsDesktop');
+    let widgetEdit = null, widgetNotes = null, widgetNotesAt = 0, widgetBattery = null;
+
+    function loadWidgets(host) {
+      try {
+        const list = JSON.parse(localStorage.getItem(widgetKey(host)) || 'null');
+        if (Array.isArray(list)) return list.filter(w => w && WIDGET_INFO[w.type]);
+      } catch (e) {}
+      return host === 'tablet' ? [{ type: 'clock' }, { type: 'calendar' }] : [];
+    }
+    function saveWidgets(host, list) { try { localStorage.setItem(widgetKey(host), JSON.stringify(list)); } catch (e) {} }
+    // The order on screen is the saved order (tablet); desktop widgets also keep where they were put.
+    function saveWidgetsFromScreen(host) {
+      const box = host === 'tablet' ? document.getElementById('tabletGrid') : document.getElementById('desktopWidgets');
+      saveWidgets(host, [...box.querySelectorAll(':scope > .mw-widget')].map(el => host === 'tablet'
+        ? { type: el.dataset.type }
+        : { type: el.dataset.type, x: Math.round(parseFloat(el.style.left) || 0), y: Math.round(parseFloat(el.style.top) || 0) }));
+    }
+
+    const WIDGET_TEMPLATES = {
+      clock: '<div class="w-time"></div><div class="w-date"></div><div class="w-greet"></div>',
+      calendar: '<div class="w-cal-head"><span class="w-month"></span><span class="w-year"></span></div><div class="w-cal-grid"></div><div class="w-cal-ev"></div>',
+      music: '<div class="w-music-top"><div class="w-art"><span class="material-symbols-outlined">music_note</span><img alt=""></div><div class="w-music-text"><div class="w-title"></div><div class="w-artist"></div></div></div><div class="w-music-ctl"><button type="button" data-cmd="prev" class="material-symbols-outlined">skip_previous</button><button type="button" data-cmd="toggle" class="material-symbols-outlined w-play">play_arrow</button><button type="button" data-cmd="next" class="material-symbols-outlined">skip_next</button></div>',
+      files: '<div class="w-head"><span class="material-symbols-outlined">folder_open</span><span class="w-head-name"></span></div><div class="w-list"></div>',
+      notes: '<div class="w-head"><span class="material-symbols-outlined">sticky_note_2</span><span class="w-head-name"></span></div><div class="w-note-title"></div><div class="w-note-body"></div>',
+      device: '<div class="w-head"><span class="material-symbols-outlined">devices</span><span class="w-head-name"></span></div><div class="w-rows"></div>'
+    };
+
+    function buildWidget(type, preview = false) {
+      const el = document.createElement('div');
+      el.className = `mw-widget mw-${type}`;
+      el.dataset.type = type;
+      el.innerHTML = WIDGET_TEMPLATES[type];
+      const head = el.querySelector('.w-head-name'); if (head) head.textContent = widgetName(type);
+      if (!preview) el.addEventListener('click', e => widgetClick(type, el, e));
+      updateWidget(el);
+      return el;
+    }
+
+    const wSet = (root, sel, text) => { const n = root.querySelector(sel); if (n && n.textContent !== text) n.textContent = text; };
+    function updateWidget(el) {
+      const now = new Date(), locale = mariowOSI18n.locale || undefined, type = el.dataset.type;
+      if (type === 'clock') {
+        // The time big, AM/PM small beside it, so it stays on one line in any widget.
+        const parts = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).formatToParts(now);
+        const period = parts.filter(p => p.type === 'dayPeriod').map(p => p.value).join('');
+        const clock = parts.filter(p => p.type !== 'dayPeriod').map(p => p.value).join('').trim();
+        const timeEl = el.querySelector('.w-time');
+        if (timeEl.dataset.v !== clock + period) {
+          timeEl.dataset.v = clock + period;
+          timeEl.textContent = clock;
+          if (period) { const small = document.createElement('small'); small.textContent = period; timeEl.append(small); }
+        }
+        wSet(el, '.w-date', now.toLocaleDateString(locale, { weekday: 'long', month: 'long', day: 'numeric' }));
+        const hour = now.getHours(), name = document.getElementById('amUserName')?.textContent || '';
+        const greeting = hour < 12 ? mariowOSI18n.t("desktop.tablet.morning", "Good morning") : hour < 18 ? mariowOSI18n.t("desktop.tablet.afternoon", "Good afternoon") : mariowOSI18n.t("desktop.tablet.evening", "Good evening");
+        wSet(el, '.w-greet', name ? `${greeting}, ${name}` : greeting);
+      } else if (type === 'calendar') {
+        const key = now.toDateString() + '|' + (typeof calendarEvents !== 'undefined' ? calendarEvents.length : 0);
+        if (el.dataset.key === key) return;
+        el.dataset.key = key;
+        const month = now.toLocaleDateString(locale, { month: 'long' });
+        wSet(el, '.w-month', month.charAt(0).toUpperCase() + month.slice(1));
+        wSet(el, '.w-year', String(now.getFullYear()));
+        const first = new Date(now.getFullYear(), now.getMonth(), 1), days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        let cells = [0, 1, 2, 3, 4, 5, 6].map(i => `<span class="dn">${osEscapeHtml(new Date(2023, 0, 1 + i).toLocaleDateString(locale, { weekday: 'narrow' }))}</span>`).join('');
+        for (let i = 0; i < first.getDay(); i++) cells += '<span></span>';
+        for (let d = 1; d <= days; d++) cells += `<span class="${d === now.getDate() ? 'today' : ''}">${d}</span>`;
+        el.querySelector('.w-cal-grid').innerHTML = cells;
+        let events = [];
+        try { if (typeof calEventsOn === 'function') events = calEventsOn(calYmd(now.getFullYear(), now.getMonth(), now.getDate())); } catch (e) {}
+        wSet(el, '.w-cal-ev', events.length ? `${events[0].allDay ? '' : (events[0].start || '') + ' · '}${events[0].title}${events.length > 1 ? ` +${events.length - 1}` : ''}` : mariowOSI18n.t("desktop.widget.no-events", "Nothing today"));
+      } else if (type === 'music') {
+        let session = null;
+        try { session = mediaSessions.get(activeMediaId) || null; } catch (e) {}   // not set up yet while the page loads
+        wSet(el, '.w-title', session ? (session.title || session.app || '') : mariowOSI18n.t("desktop.media.not-playing", "Not playing"));
+        wSet(el, '.w-artist', session ? (session.artist || session.app || '') : mariowOSI18n.t("desktop.widget.music-hint", "Play something in Music or the Browser"));
+        wSet(el, '.w-play', session && session.isPlaying ? 'pause' : 'play_arrow');
+        const art = session ? safeMediaArt(session.art) : '', img = el.querySelector('.w-art img');
+        if (img.dataset.src !== art) { img.dataset.src = art; if (art) img.src = art; else img.removeAttribute('src'); }
+        el.classList.toggle('has-art', !!art);
+        el.classList.toggle('idle', !session);
+      } else if (type === 'files') {
+        const files = readRecentFiles().slice(0, 4), key = JSON.stringify(files.map(f => f.path + f.name));
+        if (el.dataset.key === key) return;
+        el.dataset.key = key;
+        const list = el.querySelector('.w-list');
+        if (!files.length) { list.innerHTML = `<div class="w-empty">${osEscapeHtml(mariowOSI18n.t("desktop.apps.no-files", "No files"))}</div>`; return; }
+        list.replaceChildren(...files.map((file, i) => {
+          const kind = RECENT_KINDS[file.kind], row = document.createElement('div');
+          row.className = 'w-file'; row.dataset.i = i; row.style.setProperty('--ft', kind.tint);
+          const glyph = document.createElement('span'); glyph.className = 'material-symbols-outlined'; glyph.textContent = kind.icon;
+          const name = document.createElement('span'); name.textContent = file.name;
+          row.append(glyph, name);
+          return row;
+        }));
+      } else if (type === 'notes') {
+        if (Date.now() - widgetNotesAt > 60000) {
+          widgetNotesAt = Date.now();
+          fetch('/api/system/notes', { cache: 'no-store' }).then(r => r.json()).then(list => { widgetNotes = Array.isArray(list) ? list : []; document.querySelectorAll('.mw-notes').forEach(updateWidget); }).catch(() => {});
+        }
+        const note = (widgetNotes || []).filter(n => !n.deletedAt).sort((a, b) => (b.pinned - a.pinned) || ((b.updatedAt || 0) - (a.updatedAt || 0)))[0];
+        const text = note ? (() => { const d = document.createElement('div'); d.innerHTML = String(note.content || '').replace(/<(img|script|style|iframe)[^>]*>/gi, ''); return d.textContent.trim(); })() : '';
+        wSet(el, '.w-note-title', note ? (note.name || mariowOSI18n.t("desktop.widget.untitled", "Untitled")) : mariowOSI18n.t("desktop.widget.no-notes", "No notes yet"));
+        wSet(el, '.w-note-body', note ? text.slice(0, 220) : mariowOSI18n.t("desktop.widget.notes-hint", "Tap to write one"));
+      } else if (type === 'device') {
+        const rows = [
+          ['battery_android_frame_full', widgetBattery ? `${Math.round(widgetBattery.level * 100)}%${widgetBattery.charging ? ' · ' + mariowOSI18n.t("desktop.battery.charging", "Charging") : ''}` : mariowOSI18n.t("desktop.widget.plugged-in", "Plugged in")],
+          [qsState.isEthernet ? 'settings_ethernet' : 'wifi', qsState.isEthernet ? 'Ethernet' : (qsState.wifi ? (qsState.connectedWifi || mariowOSI18n.t("desktop.qs.on", "On")) : mariowOSI18n.t("desktop.qs.off", "Off"))],
+          ['bluetooth', qsState.bluetooth ? (qsState.connectedBt || mariowOSI18n.t("desktop.qs.on", "On")) : mariowOSI18n.t("desktop.qs.off", "Off")],
+          ['apps', mariowOSI18n.t("desktop.widget.open-apps", "{count} open", { count: runningApps.size })]
+        ];
+        const key = JSON.stringify(rows);
+        if (el.dataset.key === key) return;
+        el.dataset.key = key;
+        el.querySelector('.w-rows').replaceChildren(...rows.map(([icon, text]) => {
+          const row = document.createElement('div'); row.className = 'w-row';
+          const g = document.createElement('span'); g.className = 'material-symbols-outlined'; g.textContent = icon;
+          const t = document.createElement('span'); t.textContent = text;
+          row.append(g, t);
+          return row;
+        }));
+      }
+    }
+    function updateWidgets(type) { document.querySelectorAll(type ? `.mw-widget.mw-${type}` : '.mw-widget').forEach(updateWidget); }
+    setInterval(() => updateWidgets(), 1000);
+    if (typeof navigator.getBattery === 'function') navigator.getBattery().then(b => { widgetBattery = b; }).catch(() => {});
+
+    function widgetClick(type, el, e) {
+      if (widgetEdit) return;
+      const open = id => document.body.classList.contains('tablet-apps') ? tabletLaunch(id, el) : openPopup(id);
+      if (type === 'music') {
+        const cmd = e.target.closest('[data-cmd]')?.dataset.cmd;
+        if (cmd) { sendMediaCommand(cmd); setTimeout(() => updateWidgets('music'), 250); return; }
+        const session = mediaSessions.get(activeMediaId);
+        if (session && typeof openMediaSource === 'function') openMediaSource(); else open('popup4');
+      } else if (type === 'calendar' || type === 'clock') open('popup11');
+      else if (type === 'files') {
+        const row = e.target.closest('.w-file');
+        const file = row && readRecentFiles()[Number(row.dataset.i)];
+        if (file) RECENT_KINDS[file.kind].open(file.path, file.name); else open('popup10');
+      } else if (type === 'notes') open('popup5');
+      else if (type === 'device') { e.stopPropagation(); document.getElementById('notificationsBtn').click(); }
+    }
+
+    // --- Where widgets live ---
+    function renderDesktopWidgets() {
+      const box = document.getElementById('desktopWidgets');
+      box.replaceChildren(...loadWidgets('desktop').map((w, i) => {
+        const el = buildWidget(w.type);
+        const spot = Number.isFinite(w.x) ? w : nextDesktopWidgetSpot(i);
+        el.style.left = spot.x + 'px'; el.style.top = spot.y + 'px';
+        return el;
+      }));
+      deskArrive('widgets', [...box.children]);
+    }
+    // New desktop widgets stack down the right side, then the next column to the left.
+    function nextDesktopWidgetSpot(index) {
+      const W = 286, H = 214, gap = 16, perColumn = Math.max(1, Math.floor((innerHeight - TASKBAR_H - 24) / (H + gap)));
+      return { x: innerWidth - 24 - W - Math.floor(index / perColumn) * (W + gap), y: 20 + (index % perColumn) * (H + gap) };
+    }
+
+    // Animated reflow: everything that moves glides from where it was (in the container's own scale).
+    function widgetFlip(container, mutate) {
+      const items = [...container.children];
+      const scale = container.getBoundingClientRect().width / (container.offsetWidth || 1) || 1;
+      const before = new Map(items.map(el => [el, el.getBoundingClientRect()]));
+      mutate();
+      [...container.children].forEach(el => {
+        const a = before.get(el); if (!a) return;
+        const b = el.getBoundingClientRect(), dx = (a.left - b.left) / scale, dy = (a.top - b.top) / scale;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) el.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0px 0px' }], { duration: 440, easing: TV_EASE });
+      });
+    }
+
+    // --- Editing ---
+    function startWidgetEdit(host) {
+      if (widgetEdit) return;
+      closeAllPanels();
+      if (host === 'tablet' && tabletForeground()) return;
+      widgetEdit = host;
+      document.body.classList.add('widget-edit', 'widget-edit-' + host);
+      const box = host === 'tablet' ? document.getElementById('tabletGrid') : document.getElementById('desktopWidgets');
+      box.querySelectorAll(':scope > .mw-widget').forEach((el, i) => addWidgetBadge(el, i));
+      renderWidgetSheet();
+      const sheet = document.getElementById('widgetSheet');
+      sheet.classList.add('open'); sheet.setAttribute('aria-hidden', 'false');
+      // Everything makes room at once: the home screen steps back, the dock and icons get out of the way.
+      if (host === 'tablet') {
+        const { home, dock } = tabletEls();
+        tabletAnimate(home, [{ transform: currentTransform(home), opacity: getComputedStyle(home).opacity }, { transform: 'matrix(0.86, 0, 0, 0.86, 0, -36)', opacity: 1 }], { duration: 520 });
+        tabletAnimate(dock, [{ transform: currentTransform(dock) }, { transform: 'translateY(150px)' }], { duration: 420 });
+      } else {
+        const icons = document.getElementById('desktop-icons');
+        icons.getAnimations().forEach(a => { if (a.id === 'widget-edit') a.cancel(); });
+        icons.animate([{ opacity: 1 }, { opacity: 0.25 }], { duration: 300, fill: 'forwards', id: 'widget-edit' });
+      }
+    }
+
+    function endWidgetEdit() {
+      if (!widgetEdit) return;
+      const host = widgetEdit;
+      widgetEdit = null;
+      document.body.classList.remove('widget-edit', 'widget-edit-tablet', 'widget-edit-desktop');
+      document.querySelectorAll('.w-remove').forEach(b => b.remove());
+      const sheet = document.getElementById('widgetSheet');
+      sheet.classList.remove('open'); sheet.setAttribute('aria-hidden', 'true');
+      if (host === 'tablet') setTabletHome(true, 520);
+      else {
+        const icons = document.getElementById('desktop-icons');
+        icons.getAnimations().forEach(a => { if (a.id === 'widget-edit') a.cancel(); });
+        icons.animate([{ opacity: 0.25 }, { opacity: 1 }], { duration: 300, id: 'widget-edit' });
+      }
+    }
+
+    function addWidgetBadge(el, i = 0) {
+      if (el.querySelector('.w-remove')) return;
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'w-remove material-symbols-outlined'; b.textContent = 'remove';
+      b.title = mariowOSI18n.t("desktop.widget.remove", "Remove widget");
+      b.style.animationDelay = (i * 40) + 'ms';
+      b.addEventListener('pointerdown', e => e.stopPropagation());
+      b.addEventListener('click', e => { e.stopPropagation(); removeWidget(el); });
+      el.appendChild(b);
+    }
+
+    function removeWidget(el) {
+      const host = widgetEdit, box = el.parentElement;
+      el.style.pointerEvents = 'none';
+      el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.6)' }], { duration: 220, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' }).finished.then(() => {
+        if (host === 'tablet') widgetFlip(box, () => el.remove()); else el.remove();
+        saveWidgetsFromScreen(host);
+        renderWidgetSheet();
+      });
+    }
+
+    function addWidget(type) {
+      const host = widgetEdit; if (!host) return;
+      const el = buildWidget(type);
+      if (host === 'tablet') {
+        const grid = document.getElementById('tabletGrid');
+        const after = [...grid.querySelectorAll(':scope > .mw-widget')].pop();
+        el.classList.add('th-widget');
+        widgetFlip(grid, () => grid.insertBefore(el, after ? after.nextSibling : grid.firstChild));
+      } else {
+        const box = document.getElementById('desktopWidgets');
+        const spot = nextDesktopWidgetSpot(box.children.length);
+        el.style.left = spot.x + 'px'; el.style.top = spot.y + 'px';
+        box.appendChild(el);
+      }
+      addWidgetBadge(el);
+      el.animate([{ opacity: 0, transform: 'scale(0.6)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: TV_EASE });
+      saveWidgetsFromScreen(host);
+      renderWidgetSheet();
+    }
+
+    // The gallery: a live preview of each widget; the ones already placed say so.
+    function renderWidgetSheet() {
+      const host = widgetEdit; if (!host) return;
+      const placed = new Set(loadWidgets(host).map(w => w.type));
+      document.getElementById('widgetSheetRow').replaceChildren(...Object.keys(WIDGET_INFO).map((type, i) => {
+        const card = document.createElement('div'); card.className = 'ws-card'; card.style.setProperty('--i', i);
+        const frame = document.createElement('div'); frame.className = 'ws-preview';
+        frame.append(buildWidget(type, true));
+        const name = document.createElement('div'); name.className = 'ws-name'; name.textContent = widgetName(type);
+        const add = document.createElement('button'); add.type = 'button'; add.className = 'ws-add';
+        add.disabled = placed.has(type);
+        add.textContent = placed.has(type) ? mariowOSI18n.t("desktop.widget.added", "Added") : mariowOSI18n.t("desktop.widget.add", "Add");
+        add.addEventListener('click', () => addWidget(type));
+        card.append(frame, name, add);
+        return card;
+      }));
+    }
+
+    (function setupWidgets() {
+      document.getElementById('widgetSheetDone').addEventListener('click', endWidgetEdit);
+      // Tablet: hold the home screen (or right-click it) to edit.
+      const home = document.getElementById('tabletHome');
+      let hold = null;
+      home.addEventListener('pointerdown', e => {
+        if (widgetEdit || e.button !== 0 || document.body.classList.contains('tablet-app-open')) return;
+        const x = e.clientX, y = e.clientY;
+        clearTimeout(hold);
+        hold = setTimeout(() => { hold = null; home.dataset.held = '1'; startWidgetEdit('tablet'); }, 550);
+        const cancel = ev => { if (ev.type !== 'pointermove' || Math.hypot(ev.clientX - x, ev.clientY - y) > 8) { clearTimeout(hold); off(); } };
+        const off = () => { window.removeEventListener('pointermove', cancel); window.removeEventListener('pointerup', cancel); };
+        window.addEventListener('pointermove', cancel); window.addEventListener('pointerup', cancel);
+      });
+      // The click that ends a long press must not open what was under it.
+      home.addEventListener('click', e => { if (home.dataset.held) { delete home.dataset.held; e.stopPropagation(); e.preventDefault(); } }, true);
+      home.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); startWidgetEdit('tablet'); });
+      // In edit mode, a tap on empty space is Done.
+      home.addEventListener('pointerdown', e => { if (widgetEdit === 'tablet' && !e.target.closest('.mw-widget')) { home.dataset.held = '1'; endWidgetEdit(); } });
+      document.getElementById('desktop-icons').addEventListener('pointerdown', e => { if (widgetEdit === 'desktop' && !e.target.closest('.mw-widget')) endWidgetEdit(); });
+
+      // Dragging in edit mode: tablet widgets trade places; desktop widgets go anywhere.
+      document.addEventListener('pointerdown', e => {
+        const el = widgetEdit && e.button === 0 && e.target.closest('.mw-widget');
+        if (!el || e.target.closest('.w-remove') || !el.parentElement || el.closest('#widgetSheet')) return;
+        e.preventDefault(); e.stopPropagation();
+        const host = widgetEdit, box = el.parentElement;
+        const scale = box.getBoundingClientRect().width / (box.offsetWidth || 1) || 1;
+        const sx = e.clientX, sy = e.clientY, start = { x: el.offsetLeft, y: el.offsetTop };
+        let px = sx, py = sy, raf = 0, lastHit = null;
+        el.classList.add('w-dragging');
+        const frame = () => {
+          raf = 0;
+          if (host === 'tablet') {
+            const others = [...box.querySelectorAll(':scope > .mw-widget')].filter(w => w !== el);
+            const hit = others.find(w => { const r = w.getBoundingClientRect(); return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom; });
+            if (hit && hit !== lastHit) {
+              const order = [...box.children];
+              widgetFlip(box, () => box.insertBefore(el, order.indexOf(hit) > order.indexOf(el) ? hit.nextSibling : hit));
+              el.getAnimations().forEach(a => { if (a.effect?.getKeyframes?.()[0]?.translate) a.cancel(); });
+            }
+            lastHit = hit || null;
+          }
+          el.style.translate = `${(px - sx) / scale - (el.offsetLeft - start.x)}px ${(py - sy) / scale - (el.offsetTop - start.y)}px`;
+        };
+        const move = ev => { px = ev.clientX; py = ev.clientY; if (!raf) raf = requestAnimationFrame(frame); };
+        const up = () => {
+          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+          cancelAnimationFrame(raf);
+          el.classList.remove('w-dragging');
+          if (host === 'desktop') {
+            const [tx, ty] = (el.style.translate || '0px 0px').split(' ').map(v => parseFloat(v) || 0);
+            el.style.translate = '';
+            el.style.left = Math.max(0, Math.min(innerWidth - el.offsetWidth, start.x + tx)) + 'px';
+            el.style.top = Math.max(0, Math.min(innerHeight - TASKBAR_H - el.offsetHeight, start.y + ty)) + 'px';
+          } else {
+            const from = el.style.translate || '0px 0px';
+            el.style.translate = '';
+            el.animate([{ translate: from }, { translate: '0px 0px' }], { duration: 420, easing: TV_EASE });
+          }
+          saveWidgetsFromScreen(host);
+        };
+        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+      }, true);
+      document.addEventListener('keydown', e => { if (widgetEdit && e.key === 'Escape') endWidgetEdit(); });
+      setTimeout(renderDesktopWidgets, 0);
     })();
 
     function handleTaskViewKeys(e) {
@@ -2294,6 +3529,7 @@ Questions? https://discord.gg/YDVxw6jfbH
         }
         if (runningApps.has(appId)) dockIcon.classList.add("running"); else dockIcon.classList.remove("running");
       });
+      if (document.body.classList.contains('tablet-mode')) renderTabletDock();
     }
 
     // --- Taskbar context menus: right-click a dock icon, or the empty taskbar ---
@@ -2511,8 +3747,6 @@ Questions? https://discord.gg/YDVxw6jfbH
       if (volIcon) volIcon.textContent = icon; if (volDdIcon) volDdIcon.textContent = icon;
       if (volIcon) volIcon.classList.toggle('muted', val === 0);
       setSliderFill(volSlider);
-      const muteTile = document.getElementById('tileMute');
-      if (muteTile) muteTile.className = `hmos-circle-toggle ${val === 0 ? 'active' : 'inactive'}`;
       const trayGroup = document.getElementById('notificationsBtn');
       if (trayGroup) trayGroup.title = mariowOSI18n.t("desktop.volume.tooltip", "Volume: {value}%", { value: val });
     }
@@ -2724,16 +3958,16 @@ Questions? https://discord.gg/YDVxw6jfbH
       } catch (err) {}
     }
 
-    function showNotification(title, msg, icon = "🔔") {
+    function showNotification(title, msg, icon = "🔔", { showInPrivacy = false } = {}) {
       const time = new Date().toLocaleTimeString(mariowOSI18n.locale, { hour: '2-digit', minute: '2-digit' });
-      notificationsHistory.unshift({ title, msg, icon, time }); if (notificationsHistory.length > 10) notificationsHistory.pop(); updateNotificationCenter();
+      notificationsHistory.unshift({ title, msg, icon, time, showInPrivacy }); if (notificationsHistory.length > 10) notificationsHistory.pop(); updateNotificationCenter();
       if (qsState.dnd) return;
       const container = document.getElementById('toast-container'); const toast = document.createElement('div'); toast.className = 'toast';
       // SECURITY (layer-2 XSS): title/msg may carry untrusted text (SSID, BT/app name); use DOM.
       const tIcon = document.createElement('div'); tIcon.className = 'toast-icon'; tIcon.textContent = icon == null ? '' : String(icon);
       const tContent = document.createElement('div'); tContent.className = 'toast-content';
       const tTitle = document.createElement('div'); tTitle.className = 'toast-title'; tTitle.textContent = title == null ? '' : String(title);
-      const tMsg = document.createElement('div'); tMsg.className = 'toast-msg'; tMsg.textContent = msg == null ? '' : String(msg);
+      const tMsg = privateText(document.createElement('div'), msg, showInPrivacy); tMsg.classList.add('toast-msg');
       tContent.append(tTitle, tMsg); toast.append(tIcon, tContent);
       container.prepend(toast); setTimeout(() => { toast.classList.add('hide'); setTimeout(() => toast.remove(), 350); }, 4000);
     }
@@ -2747,9 +3981,12 @@ Questions? https://discord.gg/YDVxw6jfbH
 
       button.disabled = true;
       document.getElementById('shutdownMariowOSLabel').textContent = mariowOSI18n.t("desktop.session.closing", "Closing...");
+      const motion = deskShutdownMotion();
       try {
+        await motion.done;
         await window.mariowOSElectron.shutdown();
       } catch (error) {
+        motion.undo();
         button.disabled = false;
         document.getElementById('shutdownMariowOSLabel').textContent = mariowOSI18n.t("desktop.session.shutdown", "Shutdown");
         showNotification(mariowOSI18n.t("desktop.session.shutdown-failed", "Shutdown failed"), error.message, '⚠️');
@@ -2765,9 +4002,12 @@ Questions? https://discord.gg/YDVxw6jfbH
 
       button.disabled = true;
       document.getElementById('rebootMariowOSLabel').textContent = mariowOSI18n.t("desktop.session.rebooting", "Rebooting…");
+      const motion = deskShutdownMotion();
       try {
+        await motion.done;
         await window.mariowOSElectron.reboot();
       } catch (error) {
+        motion.undo();
         button.disabled = false;
         document.getElementById('rebootMariowOSLabel').textContent = mariowOSI18n.t("desktop.session.reboot", "Reboot");
         showNotification(mariowOSI18n.t("desktop.session.reboot-failed", "Reboot failed"), error.message, '⚠️');
@@ -2793,7 +4033,7 @@ Questions? https://discord.gg/YDVxw6jfbH
         const title = document.createElement('span'); title.className = 'nc-item-title'; title.textContent = n.title == null ? '' : String(n.title);
         const time = document.createElement('span'); time.className = 'nc-item-time'; time.textContent = n.time == null ? '' : String(n.time);
         row.append(title, time);
-        const msg = document.createElement('div'); msg.className = 'nc-item-msg'; msg.textContent = n.msg == null ? '' : String(n.msg);
+        const msg = privateText(document.createElement('div'), n.msg, n.showInPrivacy); msg.classList.add('nc-item-msg');
         body.append(row, msg);
         const close = document.createElement('button'); close.type = 'button'; close.className = 'nc-item-close material-symbols-outlined'; close.textContent = 'close';
         close.addEventListener('click', e => { e.stopPropagation(); dismissNotification(n, item); });
@@ -2854,6 +4094,7 @@ Questions? https://discord.gg/YDVxw6jfbH
     const safeMediaArt = art => (/^(https:|blob:|\/|data:image\/)/i.test(String(art || '')) ? String(art) : '');
 
     function renderMediaCard() {
+      if (typeof updateWidgets === 'function') setTimeout(() => updateWidgets('music'), 0);
       const session = mediaSessions.get(activeMediaId) || null;
       const art = session ? safeMediaArt(session.art) : '';
       const card = document.getElementById('mediaPlayerBanner');
@@ -3001,15 +4242,16 @@ Questions? https://discord.gg/YDVxw6jfbH
 
     function unlockDesktop() {
       const container = document.getElementById('lockscreenContainer');
-      if (container && !container.classList.contains('unlocking')) {
+      if (container && container.classList.contains('active') && !container.classList.contains('unlocking')) {
         container.classList.add('unlocking');
+        deskReplayEntrance();
         setTimeout(() => {
           container.classList.remove('active');
           container.classList.remove('unlocking');
           container.setAttribute('aria-hidden', 'true');
           const lockFrame = document.getElementById('lockscreenFrame');
           if (lockFrame && lockFrame.contentWindow) lockFrame.contentWindow.postMessage({ type: 'lockscreen-deactivated' }, '*');
-        }, 520);
+        }, 260);
       }
     }
 
@@ -3029,6 +4271,7 @@ Questions? https://discord.gg/YDVxw6jfbH
     }
 
     function updateContextBar() {
+      syncDockFocus();
       const topPopup = getTopmostPopup(); const contextDropdown = document.getElementById('contextDropdown');
       if (topPopup && !topPopup.id.startsWith('dialog_')) { // Don't show quit for dialogs
         const span = topPopup.querySelector('.popup-header span'); const appName = span ? span.innerText : mariowOSI18n.t("desktop.dock.app", "App");
@@ -3085,6 +4328,7 @@ Questions? https://discord.gg/YDVxw6jfbH
 
     function toggleMaximize(popupId) {
       const el = document.getElementById(popupId); if (!el) return;
+      if (tabletAppsOn()) return;
       animateRect(el, () => {
       if (el.classList.contains('maximized')) {
         el.classList.remove('maximized'); el.style.width = el.dataset.prevWidth; el.style.height = el.dataset.prevHeight; el.style.top = el.dataset.prevTop; el.style.left = el.dataset.prevLeft; el.style.borderRadius = '16px';
@@ -3102,6 +4346,587 @@ Questions? https://discord.gg/YDVxw6jfbH
       popup.removeEventListener('animationend', windowExits.get(popup));
       windowExits.delete(popup);
     }
+    // ═══ Desktop motion, in the style of HarmonyOS ═══
+    // Windows grow out of whatever opened them (a desktop icon, an apps-menu entry, a widget,
+    // the dock) and shrink back into their dock icon when minimized, on the same spring as
+    // tablet mode. Each move starts from where the window is on screen right now, so opening a
+    // window that is still minimizing turns it around halfway, and nothing ever jumps. Several
+    // windows going at once (Show desktop) leave one after another, like a ripple.
+    const deskAnims = new WeakMap();
+    let deskLaunchFrom = null, deskStagger = 0;
+    const deskMotionOn = popup => !!popup && !popup.id.startsWith('dialog_') && !tabletAppsOn()
+      && !document.body.classList.contains('lab-animations') && !document.body.classList.contains('lab-performance')
+      && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Remember what was pressed last, so the window that opens can grow out of it.
+    document.addEventListener('pointerdown', e => {
+      const src = e.target.closest?.('.desktop-item, .am-app, .dock-icon, .mw-widget, .td-app, [data-popup]');
+      if (!src) return;
+      const icon = src.querySelector('.desktop-item-icon, .am-icon, img, .menu-icon-symbol, .menu-icon') || src;
+      const r = icon.getBoundingClientRect();
+      if (r.width && r.height) deskLaunchFrom = { rect: { left: r.left, top: r.top, width: r.width, height: r.height }, at: performance.now() };
+    }, true);
+
+    function deskIconRect(popupId) {
+      const icon = document.querySelector(`.dock-icon[data-popup="${CSS.escape(popupId)}"]`);
+      const r = icon?.getBoundingClientRect();
+      if (r && r.width) return r;
+      return { left: innerWidth / 2 - 24, top: innerHeight - 48, width: 48, height: 48 };
+    }
+    // The window drawn small over a rectangle, keeping its own shape (transform origin 0 0).
+    function deskRectMatrix(popup, r) {
+      const pw = popup.offsetWidth || 1, ph = popup.offsetHeight || 1;
+      const s = Math.max(0.03, Math.max(r.width / pw, r.height / ph) * 1.25);
+      const tx = r.left + r.width / 2 - popup.offsetLeft - pw * s / 2;
+      const ty = r.top + r.height / 2 - popup.offsetTop - ph * s / 2;
+      return `matrix(${s}, 0, 0, ${s}, ${tx}, ${ty})`;
+    }
+    function deskAnimate(popup, keyframes, options) {
+      deskAnims.get(popup)?.cancel();
+      popup.style.transformOrigin = '0 0';
+      const anim = popup.animate(keyframes, { easing: TV_EASE, fill: 'both', ...options });
+      deskAnims.set(popup, anim);
+      return anim;
+    }
+
+    // The dock icon of an app that opens hops up and settles.
+    // Like Windows 11, only the icon moves (the button and its pill stay put): up and back when
+    // its window opens or comes back, down and back when it is minimized.
+    function deskIconGlyph(popupId) {
+      const button = document.querySelector(`.dock-icon[data-popup="${CSS.escape(popupId)}"]`);
+      return button?.querySelector('img, .menu-icon-symbol, .menu-icon, .dock-taskview-icon') || button;
+    }
+    // Soft on both ends: it eases out of rest, turns round gently, and eases back in, so it
+    // reads as a small float rather than a knock. A new one picks up from where the last one is.
+    function deskNudgeIcon(popupId, px) {
+      const glyph = deskIconGlyph(popupId);
+      if (!glyph) return;
+      const from = getComputedStyle(glyph).translate;
+      glyph.getAnimations().forEach(a => { if (a.id === 'nudge') a.cancel(); });
+      const anim = glyph.animate([
+        { translate: from === 'none' ? '0 0' : from, easing: 'cubic-bezier(0.33, 0, 0.25, 1)' },
+        { translate: `0 ${px}px`, offset: 0.4, easing: 'cubic-bezier(0.45, 0, 0.2, 1)' },
+        { translate: '0 0' }], { duration: 640 });
+      anim.id = 'nudge';
+    }
+    const deskHopIcon = popupId => deskNudgeIcon(popupId, -5);
+    const deskDipIcon = popupId => deskNudgeIcon(popupId, 4);
+
+    // Like Windows: when the window in front is minimized or closed, the next one down takes
+    // focus (and its dock icon the long pill).
+    function deskPassFocus(popup) {
+      if (tabletAppsOn() || !popup.classList.contains('focused')) return;
+      popup.classList.remove('focused');
+      const next = getTopmostPopup();
+      if (next && next !== popup) focusPopup(next);
+    }
+    // Which dock icon has the long pill: the app whose window is in front and not leaving.
+    function syncDockFocus() {
+      const front = document.querySelector('.popup.focused.active:not(.minimizing):not(.closing)');
+      document.querySelectorAll('.dock-icon[data-popup]').forEach(b => b.classList.toggle('win-focus', !!front && b.dataset.popup === front.id));
+    }
+
+    // Shutting down (or restarting): the windows sink away, the dock icons drop from the outer
+    // edges in, the taskbar goes down, and then the wallpaper slowly fades to black. Returns a
+    // function that puts everything back, for when the shutdown does not go through.
+    function deskShutdownMotion() {
+      const anims = [];
+      const out = 'cubic-bezier(0.4, 0, 0.7, 1)';
+      const play = (el, frames, ms, delay = 0, easing = out) => { if (el) anims.push(el.animate(frames, { duration: ms, delay, easing, fill: 'forwards' })); };
+      closeAllPanels();
+      if (typeof taskViewOpen !== 'undefined' && taskViewOpen) closeTaskView();
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const k = still ? 0 : 1;
+      [...document.querySelectorAll('.popup.active')].filter(p => p.style.display !== 'none')
+        .sort((a, b) => (parseInt(b.style.zIndex) || 0) - (parseInt(a.style.zIndex) || 0))
+        .forEach((p, i) => play(p, [{ opacity: 1, transform: 'none', transformOrigin: '50% 60%' }, { opacity: 0, transform: 'translateY(30px) scale(0.92)', transformOrigin: '50% 60%' }], 380 * k, i * 50 * k));
+      [...document.querySelectorAll('#desktop-icons > .desktop-item, #desktopWidgets > .mw-widget')]
+        .forEach((el, i) => play(el, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.86)' }], 360 * k, (80 + i * 20) * k));
+      ['tabletHome', 'tabletStatus', 'tabletDock', 'tabletHomeBar'].forEach(id => play(document.getElementById(id), [{ opacity: getComputedStyle(document.getElementById(id)).opacity }, { opacity: 0 }], 360 * k, 60 * k));
+      const icons = [...document.querySelectorAll('.status-center .dock-icon')], mid = (icons.length - 1) / 2;
+      icons.forEach((el, i) => play(el, [{ opacity: 1, translate: '0 0' }, { opacity: 0, translate: '0 34px' }], 360 * k, (120 + (mid - Math.abs(i - mid)) * 35) * k));
+      const side = el => [...(el?.children || [])].filter(c => !c.matches('.dropdown'));
+      [...side(document.querySelector('.status-left')), ...side(document.querySelector('.status-right'))]
+        .forEach(el => play(el, [{ opacity: 1, translate: '0 0' }, { opacity: 0, translate: '0 30px' }], 340 * k, 160 * k));
+      play(document.querySelector('.status-bar-bg'), [{ transform: 'none' }, { transform: 'translateY(100%)' }], 460 * k, 300 * k);
+      play(document.getElementById('desktop-wallpaper'), [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '1.04' }], 1300 * k, 650 * k, 'cubic-bezier(0.4, 0, 0.2, 1)');
+      const done = new Promise(r => setTimeout(r, still ? 0 : 2000));
+      return { done, undo: () => anims.forEach(a => a.cancel()) };
+    }
+
+    function desktopOpenMotion(popup) {
+      if (!deskMotionOn(popup)) { popup.classList.remove('mw-anim'); return; }
+      const prev = deskAnims.get(popup), midway = prev?.playState === 'running';
+      popup.classList.add('mw-anim');
+      let rect = null;
+      if (deskLaunchFrom && performance.now() - deskLaunchFrom.at < 1500) rect = deskLaunchFrom.rect;
+      deskLaunchFrom = null;
+      rect = rect || deskIconRect(popup.id);
+      const frames = midway
+        ? [{ transform: currentTransform(popup), opacity: getComputedStyle(popup).opacity }, { transform: TABLET_IDENTITY, opacity: 1 }]
+        : [{ transform: deskRectMatrix(popup, rect), opacity: 0 }, { opacity: 1, offset: 0.28 }, { transform: TABLET_IDENTITY, opacity: 1 }];
+      const anim = deskAnimate(popup, frames, { duration: 540 });
+      anim.finished.then(() => { if (deskAnims.get(popup) !== anim) return; anim.cancel(); deskAnims.delete(popup); popup.style.transformOrigin = ''; }, () => {});
+      deskHopIcon(popup.id);
+    }
+
+    // Called by minimizePopup after it set up the exit: plays the move, then ends the exit.
+    function desktopMinimizeMotion(popup) {
+      if (!deskMotionOn(popup)) { popup.classList.remove('mw-anim'); return false; }
+      popup.classList.add('mw-anim');
+      const delay = deskStagger++ * 45;
+      if (deskStagger === 1) queueMicrotask(() => { deskStagger = 0; });
+      const from = { transform: currentTransform(popup), opacity: getComputedStyle(popup).opacity };
+      const anim = deskAnimate(popup, [from, { opacity: 1, offset: 0.5 }, { transform: deskRectMatrix(popup, deskIconRect(popup.id)), opacity: 0 }], { duration: 460, delay });
+      anim.finished.then(() => {
+        if (deskAnims.get(popup) !== anim) return;
+        popup.dispatchEvent(new Event('animationend'));
+        anim.cancel(); deskAnims.delete(popup); popup.style.transformOrigin = '';
+      }, () => {});
+      return true;
+    }
+
+    // Desktop icons and widgets arrive one after another the first time the desktop shows.
+    let deskArrived = { icons: false, widgets: false };
+    function deskArrive(kind, elements) {
+      if (deskArrived[kind] || tabletAppsOn() || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      // Still starting up: these join the entrance when it plays.
+      if (document.body.classList.contains('desk-booting')) { deskPendingArrivals[kind] = elements; return; }
+      deskArrived[kind] = true;
+      elements.forEach((el, i) => el.animate(
+        [{ opacity: 0, transform: 'translateY(22px) scale(0.8)' }, { opacity: 1, offset: 0.3 }, { opacity: 1, transform: 'none' }],
+        { duration: 700, delay: 360 + i * 40, easing: TV_EASE, fill: 'backwards' }));
+    }
+
+    let deskEntered = false;
+    const deskPendingArrivals = {};
+    const deskStill = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const deskPlay = (el, frames, ms, delay) => el?.animate(frames, { duration: ms, delay, easing: TV_EASE, fill: 'backwards' });
+    const deskSettleWallpaper = () => document.getElementById('desktop-wallpaper').animate([{ scale: '1.08' }, { scale: '1' }], { duration: 1000, easing: TV_EASE, fill: 'backwards' });
+
+    // The taskbar arrives: its glass rises (the blurred layer moves by itself, never inside a
+    // moving or fading parent, so it is blurred the whole way), the buttons on each side follow
+    // from the outer edges in, and the dock ripples out from its middle.
+    function deskTaskbarArrive(delay = 0) {
+      deskPlay(document.querySelector('.status-bar-bg'), [{ transform: 'translateY(100%)' }, { transform: 'none' }], 640, delay);
+      const side = el => [...(el?.children || [])].filter(c => !c.matches('.dropdown'));
+      const rise = [{ transform: 'translateY(26px)', opacity: 0 }, { transform: 'none', opacity: 1 }];
+      side(document.querySelector('.status-left')).forEach((el, i) => deskPlay(el, rise, 620, delay + 80 + i * 50));
+      side(document.querySelector('.status-right')).reverse().forEach((el, i) => deskPlay(el, rise, 620, delay + 80 + i * 40));
+      const icons = [...document.querySelectorAll('.status-center .dock-icon')];
+      const mid = (icons.length - 1) / 2;
+      icons.forEach((el, i) => deskPlay(el, [{ transform: 'translateY(30px) scale(0.55)', opacity: 0 }, { opacity: 1, offset: 0.3 }, { transform: 'none', opacity: 1 }], 700, delay + 100 + Math.abs(i - mid) * 45));
+    }
+
+    // Open windows come up out of the wallpaper's depth, back to front.
+    function deskWindowsArrive(delay = 0) {
+      const windows = [...document.querySelectorAll('.popup.active')]
+        .filter(p => !p.classList.contains('closing') && !p.classList.contains('minimizing') && p.style.display !== 'none')
+        .sort((a, b) => (parseInt(a.style.zIndex) || 0) - (parseInt(b.style.zIndex) || 0));
+      windows.forEach((p, i) => deskPlay(p, [
+        { transform: 'translateY(40px) scale(0.9)', transformOrigin: '50% 60%', opacity: 0 },
+        { opacity: 1, transformOrigin: '50% 60%', offset: 0.3 },
+        { transform: 'none', transformOrigin: '50% 60%', opacity: 1 }], 760, delay + i * 60));
+    }
+
+    function deskItemsArrive(delay = 0) {
+      [...document.querySelectorAll('#desktop-icons > .desktop-item, #desktopWidgets > .mw-widget')].forEach((el, i) => deskPlay(el,
+        [{ opacity: 0, transform: 'translateY(22px) scale(0.8)' }, { opacity: 1, offset: 0.3 }, { opacity: 1, transform: 'none' }], 700, delay + i * 35));
+    }
+
+    // ═══ Desktop entrance, in the style of HarmonyOS ═══
+    // Everything waits (hidden by body.desk-booting, except the wallpaper, which is never
+    // hidden) until the wallpaper is decoded and the dock is built, then arrives together on
+    // one spring: the wallpaper settles from the slight zoom the sign-in screen left it at,
+    // the taskbar arrives (deskTaskbarArrive), and the desktop icons and widgets follow.
+    async function deskEntrance() {
+      if (deskEntered) return;
+      deskEntered = true;
+      const body = document.body;
+      const finish = () => {
+        body.classList.remove('desk-booting');
+        Object.entries(deskPendingArrivals).forEach(([kind, els]) => deskArrive(kind, els));
+      };
+      if (deskStill()) { finish(); return; }
+      if (tabletAppsOn()) { deskSettleWallpaper(); finish(); return; }
+      // The wallpaper must be ready, or the glass would blur a black screen and "turn on" later.
+      const wall = document.getElementById('desktop-wallpaper');
+      const url = (getComputedStyle(wall).backgroundImage.match(/url\(["']?(.*?)["']?\)/) || [])[1];
+      if (url) {
+        const img = new Image(); img.src = url;
+        await Promise.race([img.decode().catch(() => {}), new Promise(r => setTimeout(r, 900))]);
+      }
+      // Two frames so the decoded wallpaper is on screen before anything moves.
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      deskSettleWallpaper();
+      deskTaskbarArrive(160);
+      finish();
+    }
+
+    // Unlocking from the lock screen plays the entrance again, with the open windows too. The
+    // lock screen has just leaned its wallpaper in, so this one starts from that same zoom.
+    function deskReplayEntrance() {
+      if (deskStill()) return;
+      deskSettleWallpaper();
+      if (tabletAppsOn()) {
+        const front = tabletForeground();
+        if (front) deskWindowsArrive(60);
+        else deskPlay(document.getElementById('tabletHome'), [{ scale: '0.92', opacity: 0 }, { opacity: 1, offset: 0.3 }, { scale: '1', opacity: 1 }], 720, 80);
+        deskPlay(document.getElementById('tabletDock'), [{ translate: '0 150px' }, { translate: '0 0' }], 640, 140);
+        deskPlay(document.getElementById('tabletStatus'), [{ translate: '0 -100%' }, { translate: '0 0' }], 620, 120);
+        return;
+      }
+      deskWindowsArrive(140);
+      deskTaskbarArrive(100);
+      deskItemsArrive(260);
+    }
+    setTimeout(() => { if (!deskEntered) { deskEntered = true; document.body.classList.remove('desk-booting'); Object.entries(deskPendingArrivals).forEach(([k, els]) => deskArrive(k, els)); } }, 5000);
+
+    // ═══ Alt+Tab: the window switcher ═══
+    // Hold Alt and press Tab (Shift+Tab or the arrows to go back): a glass strip of the open
+    // windows, most recently used first and minimized ones included, with a ring that glides
+    // to the selection. Letting go of Alt switches; Esc cancels. A quick Alt+Tab swaps to the
+    // previous window without showing anything. On Windows the launcher claims Alt+Tab while
+    // mariowOS is in front, and forwards the keys from inside apps and the Browser.
+    const windowMRU = [];
+    function noteWindowUse(popup) {
+      if (!popup || !popup.id || popup.id.startsWith('dialog_')) return;
+      const i = windowMRU.indexOf(popup.id);
+      if (i >= 0) windowMRU.splice(i, 1);
+      windowMRU.unshift(popup.id);
+    }
+    const switcher = { active: false, shown: false, items: [], index: 0, timer: 0 };
+
+    function switcherWindows() {
+      const open = [...runningApps].filter(id => !id.startsWith('dialog_') && document.getElementById(id) && isAppAllowed(id));
+      return [...windowMRU.filter(id => open.includes(id)), ...open.filter(id => !windowMRU.includes(id))];
+    }
+
+    function renderSwitcher() {
+      const panel = document.querySelector('#winSwitcher .wsw-panel');
+      const cards = switcher.items.map((id, i) => {
+        const app = getAllApps().find(a => a.id === id);
+        const popup = document.getElementById(id);
+        const minimized = popup.style.display === 'none';
+        const card = document.createElement('button');
+        card.type = 'button'; card.className = 'wsw-card'; card.dataset.index = i; card.setAttribute('role', 'option');
+        card.style.setProperty('--i', i);
+        const preview = document.createElement('span'); preview.className = 'wsw-preview';
+        const tpl = document.createElement('template'); tpl.innerHTML = renderOsIcon(app ? app.icon : '', 'dock'); preview.append(tpl.content);
+        if (minimized) { const badge = document.createElement('span'); badge.className = 'wsw-min material-symbols-outlined'; badge.textContent = 'minimize'; preview.append(badge); }
+        const label = document.createElement('span'); label.className = 'wsw-label';
+        label.textContent = app ? String(app.title) : (popup.querySelector('.popup-header span')?.textContent || id);
+        card.append(preview, label);
+        card.addEventListener('pointerenter', () => { if (switcher.active) selectSwitcher(i); });
+        card.addEventListener('click', () => { selectSwitcher(i); commitSwitcher(); });
+        return card;
+      });
+      const ring = document.createElement('span'); ring.className = 'wsw-ring';
+      panel.replaceChildren(ring, ...cards);
+    }
+
+    // The ring glides to the selected card (a transform, on the compositor).
+    function placeSwitcherRing(instant) {
+      const panel = document.querySelector('#winSwitcher .wsw-panel');
+      const card = panel.querySelector(`.wsw-card[data-index="${switcher.index}"]`), ring = panel.querySelector('.wsw-ring');
+      if (!card || !ring) return;
+      panel.querySelectorAll('.wsw-card').forEach(c => c.classList.toggle('on', c === card));
+      card.setAttribute('aria-selected', 'true');
+      if (instant) ring.style.transition = 'none';
+      ring.style.width = card.offsetWidth + 'px'; ring.style.height = card.offsetHeight + 'px';
+      ring.style.transform = `translate(${card.offsetLeft}px, ${card.offsetTop}px)`;
+      if (instant) { void ring.offsetWidth; ring.style.transition = ''; }
+      card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    function selectSwitcher(index) {
+      const n = switcher.items.length;
+      if (!n) return;
+      switcher.index = ((index % n) + n) % n;
+      if (switcher.shown) placeSwitcherRing(false);
+    }
+
+    function showSwitcher() {
+      if (!switcher.active || switcher.shown) return;
+      switcher.shown = true;
+      renderSwitcher();
+      const box = document.getElementById('winSwitcher');
+      box.classList.add('open'); box.setAttribute('aria-hidden', 'false');
+      placeSwitcherRing(true);
+    }
+
+    function hideSwitcher() {
+      clearTimeout(switcher.timer);
+      switcher.active = false; switcher.shown = false;
+      const box = document.getElementById('winSwitcher');
+      box.classList.remove('open'); box.setAttribute('aria-hidden', 'true');
+    }
+
+    function commitSwitcher() {
+      if (!switcher.active) return;
+      const id = switcher.items[switcher.index];
+      hideSwitcher();
+      if (!id) return;
+      const popup = document.getElementById(id);
+      if (!popup) return;
+      // A window already on screen just comes to the front; a minimized one is restored.
+      if (popup.classList.contains('active') && popup.style.display !== 'none' && !tabletAppsOn()) { focusPopup(popup); updateContextBar(); }
+      else openPopup(id);
+    }
+
+    function handleSwitcher(action) {
+      const locked = document.getElementById('lockscreenContainer')?.classList.contains('active');
+      if (action === 'commit') return commitSwitcher();
+      if (action === 'cancel') return hideSwitcher();
+      const step = action === 'prev' ? -1 : 1;
+      if (!switcher.active) {
+        if (locked || taskViewOpen) return;
+        switcher.items = switcherWindows();
+        if (!switcher.items.length) return;
+        switcher.active = true;
+        closeAllPanels();
+        // Like the next window in line: the one before the current, or the last going back.
+        switcher.index = step > 0 ? Math.min(1, switcher.items.length - 1) : switcher.items.length - 1;
+        // Only shown if Alt is still held a moment later; a quick tap just swaps.
+        switcher.timer = setTimeout(showSwitcher, 130);
+        return;
+      }
+      selectSwitcher(switcher.index + step);
+    }
+
+    window.mariowOSElectron?.onShellSwitcher?.(handleSwitcher);
+    // Where the host lets Alt+Tab through to the page (and in a plain browser).
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.key === 'Tab') { e.preventDefault(); handleSwitcher(e.shiftKey ? 'prev' : 'next'); return; }
+      if (!switcher.active) return;
+      if (e.key === 'Escape') { e.preventDefault(); handleSwitcher('cancel'); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); handleSwitcher(e.key === 'ArrowLeft' ? 'prev' : 'next'); }
+    }, true);
+    document.addEventListener('keyup', e => { if (e.key === 'Alt' && switcher.active) { e.preventDefault(); commitSwitcher(); } }, true);
+    window.addEventListener('blur', () => { if (switcher.active && !document.hasFocus()) setTimeout(() => { if (switcher.active && !document.hasFocus()) hideSwitcher(); }, 400); });
+
+    // --- Privacy mode ---
+    // While it's on: notifications keep their title but not what they say, Task View frosts
+    // every window over, and (in the mariowOS container) screenshots, recordings and screen
+    // sharing see a blank window. A shield draws itself in the middle of the screen when it
+    // turns on and flies down into the taskbar, where it stays; turning it off brings the
+    // shield back up and breaks it open. Every step can be interrupted by toggling again.
+    const PRIVACY_KEY = 'mariowos_privacy_mode';
+    let privacyMode = false, privacyGen = 0, privacyAnims = [], privacyTimers = [];
+
+    // A message that privacy mode can hide: the real text and its "Content hidden" stand-in.
+    // showInPrivacy: system messages about privacy mode itself, which have nothing to hide.
+    function privateText(el, text, showInPrivacy = false) {
+      if (showInPrivacy) { el.textContent = text == null ? '' : String(text); return el; }
+      const real = document.createElement('span'); real.className = 'pm-real'; real.textContent = text == null ? '' : String(text);
+      const mask = document.createElement('span'); mask.className = 'pm-mask';
+      const icon = document.createElement('span'); icon.className = 'material-symbols-outlined'; icon.textContent = 'visibility_off';
+      const label = document.createElement('span'); label.textContent = mariowOSI18n.t("desktop.privacy.hidden", "Content hidden");
+      mask.append(icon, label); el.append(real, mask);
+      return el;
+    }
+
+    function applyPrivacyMode(on) {
+      privacyMode = !!on;
+      document.body.classList.toggle('privacy-mode', privacyMode);
+      const tile = document.getElementById('tilePrivacy');
+      if (tile) tile.className = `hmos-circle-toggle ${privacyMode ? 'active' : 'inactive'}`;
+      const tray = document.getElementById('trayPrivacy');
+      if (tray) tray.title = privacyMode ? mariowOSI18n.t("desktop.privacy.on", "Privacy mode on") : '';
+      try { localStorage.setItem(PRIVACY_KEY, privacyMode ? '1' : '0'); } catch (e) {}
+      window.mariowOSElectron?.setPrivacy?.(privacyMode)?.catch?.(() => {});
+    }
+
+    function togglePrivacyMode() {
+      const on = !privacyMode;
+      // Where the taskbar's shield is now: turning off, the glass rises from there.
+      const from = privacyTrayRect();
+      applyPrivacyMode(on);
+      if (on) playQsIcon('tilePrivacy');
+      if (on) privacyIntro();
+      playPrivacyShield(on, from);
+    }
+
+    function privacyTrayRect() {
+      const tray = document.getElementById('trayPrivacy'), bar = document.querySelector('.status-bar');
+      if (!tray || !document.body.classList.contains('privacy-mode')) return null;
+      const r = tray.getBoundingClientRect();
+      const shown = r.width > 4 && r.top >= 0 && r.bottom <= innerHeight + 1 && bar && getComputedStyle(bar).visibility !== 'hidden' && getComputedStyle(bar).opacity !== '0' && !tabletMode;
+      return shown ? r : null;
+    }
+
+    // The first time privacy mode is turned on, a notification says what it does.
+    function privacyIntro() {
+      try { if (localStorage.getItem('mariowos_privacy_intro')) return; localStorage.setItem('mariowos_privacy_intro', '1'); } catch (e) { return; }
+      const detail = window.mariowOSElectron?.setPrivacy
+        ? mariowOSI18n.t("desktop.privacy.on-detail", "Notification content, windows you're not using and screenshots are hidden")
+        : mariowOSI18n.t("desktop.privacy.on-detail-web", "Notification content and windows you're not using are hidden");
+      // After the shield has landed in the taskbar.
+      setTimeout(() => showNotification(mariowOSI18n.t("desktop.privacy.on", "Privacy mode on"), detail, '🛡️', { showInPrivacy: true }), 1900);
+    }
+
+    let privacyGlitterRaf = 0, privacyLensKey = '';
+    function stopPrivacyShield() {
+      privacyGen++;
+      privacyAnims.forEach(a => a.cancel()); privacyAnims = [];
+      privacyTimers.forEach(clearTimeout); privacyTimers = [];
+      cancelAnimationFrame(privacyGlitterRaf);
+      document.body.classList.remove('privacy-arriving');
+    }
+
+    // The lens: a displacement map that pulls what's behind the glass inward, harder toward
+    // the rim, so the wallpaper's lines bend at the shield's edge like in thick glass.
+    function privacyLens(w, h) {
+      const key = w + 'x' + h;
+      if (key === privacyLensKey) return;
+      privacyLensKey = key;
+      const cw = 96, ch = 126, canvas = document.createElement('canvas');
+      canvas.width = cw; canvas.height = ch;
+      const ctx = canvas.getContext('2d'), img = ctx.createImageData(cw, ch);
+      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+        const nx = (x + 0.5) / cw * 2 - 1, ny = (y + 0.5) / ch * 2 - 1;
+        const k = Math.pow(Math.min(1, Math.hypot(nx, ny * 1.08)), 2.2), i = (y * cw + x) * 4;
+        img.data[i] = 128 - nx * k * 127; img.data[i + 1] = 128 - ny * k * 127; img.data[i + 2] = 128; img.data[i + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      const map = document.getElementById('psLensMap');
+      map.setAttribute('href', canvas.toDataURL());
+      map.setAttribute('width', w); map.setAttribute('height', h);
+      document.getElementById('psLensDisp').setAttribute('scale', Math.round(w * 0.38));
+    }
+
+    // Glitter: specks that twinkle and drift up across the whole screen while the shield shows.
+    function privacyGlitter(gen) {
+      const canvas = document.querySelector('#privacyShield .ps-glitter');
+      const dpr = Math.min(2, devicePixelRatio || 1), W = innerWidth, H = innerHeight;
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const cx = W / 2, cy = H * 0.46, reach = Math.hypot(W, H) * 0.55;
+      const specks = Array.from({ length: 190 }, () => {
+        const a = Math.random() * Math.PI * 2, d = Math.pow(Math.random(), 0.65) * reach;
+        return { x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d * 0.75, r: 0.5 + Math.random() * Math.random() * 1.6, phase: Math.random() * 6.28, speed: 3 + Math.random() * 8,
+          vx: (Math.random() - 0.5) * 14, vy: -6 - Math.random() * 16, born: d / reach * 260 + Math.random() * 120 };
+      });
+      const start = performance.now();
+      const frame = now => {
+        if (gen !== privacyGen) return;
+        const t = now - start, s = t / 1000;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#fff';
+        for (const p of specks) {
+          const age = t - p.born;
+          if (age < 0) continue;
+          ctx.globalAlpha = Math.min(1, age / 200) * (0.25 + 0.75 * Math.sin(p.phase + s * p.speed) ** 2);
+          const x = p.x + p.vx * s, y = p.y + p.vy * s;
+          ctx.beginPath(); ctx.arc(x, y, p.r, 0, 6.2832); ctx.fill();
+          // The bigger specks catch the light: a small four-point star.
+          if (p.r > 1.35) { ctx.globalAlpha *= 0.6; ctx.fillRect(x - p.r * 3, y - 0.35, p.r * 6, 0.7); ctx.fillRect(x - 0.35, y - p.r * 3, 0.7, p.r * 6); }
+        }
+        privacyGlitterRaf = requestAnimationFrame(frame);
+      };
+      privacyGlitterRaf = requestAnimationFrame(frame);
+    }
+
+    function playPrivacyShield(on, fromTray) {
+      const root = document.getElementById('privacyShield'), q = s => root.querySelector(s);
+      const fly = q('.ps-fly');
+      const parts = { glass: q('.ps-glass'), rim: q('.ps-rim'), solid: q('.ps-solid'), veil: q('.ps-veil'), glitter: q('.ps-glitter') };
+      const opacityOf = el => +getComputedStyle(el).opacity;
+      // Toggled again mid-animation: carry on from where everything is now.
+      const midway = root.classList.contains('show')
+        ? { fly: currentTransform(fly), ...Object.fromEntries(Object.entries(parts).map(([k, el]) => [k, opacityOf(el)])) }
+        : null;
+      stopPrivacyShield();
+      const gen = privacyGen;
+      const ring = q('.ps-ring'), sheen = q('.ps-sheen'), glint = q('.ps-glint'), check = q('.ps-check');
+      // The glass is about two fifths of the screen tall.
+      const h = Math.round(Math.min(innerHeight * 0.42, innerWidth * 0.4 * 126 / 96)), w = Math.round(h * 96 / 126);
+      root.style.setProperty('--psw', w + 'px'); root.style.setProperty('--psh', h + 'px');
+      privacyLens(w, h);
+      root.classList.add('show');
+
+      const play = (el, frames, opts) => { const a = el.animate(frames, { fill: 'both', ...opts }); privacyAnims.push(a); return a; };
+      const fade = (el, from, to, duration, delay = 0, easing = 'ease-out') => play(el, [{ opacity: from }, { opacity: to }], { duration, delay, easing });
+      const later = (ms, fn) => privacyTimers.push(setTimeout(() => { if (gen === privacyGen) fn(); }, ms));
+      const finish = ms => later(ms, () => { stopPrivacyShield(); root.classList.remove('show'); });
+      const was = k => midway ? midway[k] : 0;
+      const cx = innerWidth / 2, cy = innerHeight * 0.46;
+      // The transform that lays the glass over the taskbar's little shield.
+      const toTray = r => `translate(${r.left + r.width / 2 - cx}px, ${r.top + r.height / 2 - cy}px) scale(${r.width / w})`;
+
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const hold = [{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }];
+        [parts.veil, parts.solid].forEach(el => play(el, hold, { duration: 1400 }));
+        [parts.glass, parts.rim, parts.glitter, ring].forEach(el => fade(el, 0, 0, 1));
+        play(fly, [{ transform: 'scale(0.4)' }, { transform: 'scale(0.4)' }], { duration: 1 });
+        return finish(1400);
+      }
+
+      privacyGlitter(gen);
+      play(sheen, [{ transform: 'translateX(-90px)' }, { transform: 'translateX(-90px)' }], { duration: 1 });
+
+      if (on) {
+        document.body.classList.add('privacy-arriving');
+        play(parts.veil, [{ opacity: was('veil') }, { opacity: 1, offset: 0.14 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 1900, easing: 'linear' });
+        play(parts.glitter, [{ opacity: was('glitter') }, { opacity: 1, offset: 0.15 }, { opacity: 1, offset: 0.55 }, { opacity: 0 }], { duration: 1900, easing: 'linear' });
+        fade(parts.solid, was('solid'), 0, 260);
+        // A round lens forms in the middle of the screen and swells into the shield.
+        if (!midway) play(ring, [{ transform: 'scale(0.25)', opacity: 0 }, { transform: 'scale(0.75)', opacity: 0.85, offset: 0.4 }, { transform: 'scale(1.3)', opacity: 0 }], { duration: 640, easing: 'cubic-bezier(0.2, 0.6, 0.3, 1)' });
+        play(fly, [{ transform: midway ? midway.fly : 'scale(0.5)' }, { transform: 'scale(1)' }], { duration: 760, delay: midway ? 0 : 90, easing: TV_EASE });
+        fade(parts.glass, was('glass'), 1, 380, midway ? 0 : 110);
+        fade(parts.rim, was('rim'), 1, 420, midway ? 0 : 180);
+        // Light runs across the glass and glints off its top corner.
+        play(sheen, [{ transform: 'translateX(-90px)' }, { transform: 'translateX(90px)' }], { duration: 700, delay: 480, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+        play(glint, [{ opacity: 0.35, transform: 'scale(0.6)' }, { opacity: 1, transform: 'scale(1.15)', offset: 0.4 }, { opacity: 0.75, transform: 'scale(1)' }], { duration: 700, delay: 420, easing: 'ease-out' });
+        // Then it flies down into the taskbar, turning into the solid shield that stays there.
+        later(1300, () => {
+          const target = privacyTrayRect();
+          if (!target) {
+            play(fly, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }], { duration: 520, easing: TV_EASE });
+            fade(parts.glass, 1, 0, 420); fade(parts.rim, 1, 0, 420);
+            later(300, () => document.body.classList.remove('privacy-arriving'));
+            return;
+          }
+          play(fly, [{ transform: 'scale(1)' }, { transform: toTray(target) }], { duration: 620, easing: TV_EASE });
+          play(check, [{ opacity: 1 }, { opacity: 1 }], { duration: 1 });
+          play(parts.solid, [{ opacity: 0 }, { opacity: 1, offset: 0.4 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: 620 });
+          fade(parts.glass, 1, 0, 300, 60); fade(parts.rim, 1, 0, 300, 60);
+          later(560, () => {
+            document.body.classList.remove('privacy-arriving');
+            play(document.querySelector('#trayPrivacy svg'), [{ transform: 'scale(0.5)' }, { transform: 'scale(1.3)', offset: 0.45 }, { transform: 'scale(1)' }], { duration: 460, easing: 'cubic-bezier(0.3, 0.7, 0.3, 1)', fill: 'none' });
+          });
+        });
+        return finish(1950);
+      }
+
+      // Off: the shield rises out of the taskbar and turns back to glass, then swells and
+      // dissolves into the glitter.
+      play(parts.veil, [{ opacity: was('veil') }, { opacity: 1, offset: 0.2 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 1500, easing: 'linear' });
+      play(parts.glitter, [{ opacity: was('glitter') }, { opacity: 1, offset: 0.2 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 1500, easing: 'linear' });
+      play(fly, midway ? [{ transform: midway.fly }, { transform: 'scale(1)' }]
+        : fromTray ? [{ transform: toTray(fromTray) }, { transform: 'scale(1)' }]
+        : [{ transform: 'scale(0.6)' }, { transform: 'scale(1)' }], { duration: 540, easing: TV_EASE });
+      if (midway) fade(parts.solid, was('solid'), 0, 200);
+      else play(parts.solid, fromTray ? [{ opacity: 1 }, { opacity: 1, offset: 0.4 }, { opacity: 0 }] : [{ opacity: 0 }, { opacity: 0 }], { duration: 440 });
+      fade(parts.glass, was('glass'), 1, 300, midway ? 0 : 120);
+      fade(parts.rim, was('rim'), 1, 300, midway ? 0 : 120);
+      play(glint, [{ opacity: 0.75 }, { opacity: 0.75 }], { duration: 1 });
+      later(640, () => {
+        play(fly, [{ transform: 'scale(1)' }, { transform: 'scale(1.24)' }], { duration: 640, easing: 'cubic-bezier(0.2, 0.6, 0.3, 1)' });
+        fade(parts.glass, 1, 0, 560, 60, 'ease-in-out'); fade(parts.rim, 1, 0, 480, 0, 'ease-in-out');
+        play(ring, [{ transform: 'scale(1)', opacity: 0 }, { transform: 'scale(1.3)', opacity: 0.6, offset: 0.25 }, { transform: 'scale(2)', opacity: 0 }], { duration: 700, easing: 'ease-out' });
+      });
+      finish(1500);
+    }
+
+    try { if (localStorage.getItem(PRIVACY_KEY) === '1') applyPrivacyMode(true); } catch (e) {}
+    // Build the lens early, in idle time, so the first toggle doesn't pay for it.
+    (window.requestIdleCallback || (fn => setTimeout(fn, 3000)))(() => {
+      const h = Math.round(Math.min(innerHeight * 0.42, innerWidth * 0.4 * 126 / 96));
+      privacyLens(Math.round(h * 96 / 126), h);
+    }, { timeout: 6000 });
+
     function onWindowExit(popup, finish) {
       cancelWindowExit(popup);
       const onEnd = () => { cancelWindowExit(popup); finish(); };
@@ -3121,6 +4946,7 @@ Questions? https://discord.gg/YDVxw6jfbH
         mwExternalConsent(host, host).then(ok => { if (ok) { popup.dataset.consentOk = '1'; openPopup(popupId); } });
         return;
       }
+      const tabletWasShown = popup.classList.contains('active') && popup.style.display !== 'none' && !popup.classList.contains('closing') && !popup.dataset.tabletLeaving;
       cancelWindowExit(popup);
       popup.classList.remove("closing", "minimizing");
       const iframe = popup.querySelector('iframe');
@@ -3156,6 +4982,9 @@ Questions? https://discord.gg/YDVxw6jfbH
 
       setPopupTransformOrigin(popupId);
       focusPopup(popup); popup.style.display = "block"; popup.classList.add("active"); popupCounter++;
+      // Tablet mode: the app grows out of its icon (before the app loads, which waits for this).
+      if (tabletAppsOn() && isTabletApp(popup) && !tabletWasShown) tabletShowApp(popup);
+      else if (!tabletAppsOn() && !tabletWasShown) desktopOpenMotion(popup);
       // Apps load and draw on the same threads as the animation, so a window that is still
       // opening would stutter. It opens first, then its app fades in.
       if (viewToLoad) {
@@ -3176,16 +5005,24 @@ Questions? https://discord.gg/YDVxw6jfbH
 
     function minimizePopup(popupId) {
       const popup = document.getElementById(popupId); if(!popup) return;
+      // Tablet mode has no minimize: the app goes home into its icon.
+      if (tabletAppsOn() && isTabletApp(popup)) { if (popup === tabletForeground()) tabletGoHome(); else tabletHideWindow(popup); return; }
       setPopupTransformOrigin(popupId);
       popup.classList.remove("active"); popup.classList.add("minimizing");
+      deskPassFocus(popup);
       updateContextBar();
       onWindowExit(popup, () => { popup.style.display = "none"; popup.classList.remove("minimizing"); });
+      desktopMinimizeMotion(popup);
+      deskDipIcon(popupId);
     }
 
     function closePopup(popupId) {
       const popup = document.getElementById(popupId); if(!popup) return;
+      if (tabletAppsOn() && popup === tabletForeground()) setTabletHome(true, 420);
+      deskAnims.get(popup)?.cancel();
       popup.style.transformOrigin = "center center"; 
       popup.classList.remove("active"); popup.classList.add("closing");
+      deskPassFocus(popup);
       updateContextBar();
       const finishClose = () => {
         popup.style.display = "none"; popup.classList.remove("closing"); 
@@ -3206,7 +5043,8 @@ Questions? https://discord.gg/YDVxw6jfbH
       const activePopups = document.getElementsByClassName("popup"); 
       Array.from(activePopups).forEach(p => p.classList.remove("focused")); 
       popup.classList.add("focused"); 
-      popup.style.zIndex = getHighestZIndex(activePopups) + 1; 
+      popup.style.zIndex = getHighestZIndex(activePopups) + 1;
+      noteWindowUse(popup); 
       
       const iframe = popup.querySelector('iframe');
       if(iframe) {
@@ -3258,13 +5096,13 @@ Questions? https://discord.gg/YDVxw6jfbH
       let isDragging = false, offsetX = 0, offsetY = 0, baseLeft = 0, baseTop = 0, dragLeft = 0, dragTop = 0, dragW = 0, dragH = 0, dragMoved = false, rafId = 0, pendingX = 0, pendingY = 0, pointerId = null;
       // App tabs in the title bar (Terminal, Files) are dragged to reorder them, not to move the window.
       const isInteractiveHeaderTarget = target => target.closest('.action-btn, .browser-tab-btn, #browserNewTab, .notes-tab-btn, #os-term-actions, #os-files-actions');
-      handle.addEventListener('dblclick', (e) => { if (isInteractiveHeaderTarget(e.target)) return; toggleMaximize(el.id); });
+      handle.addEventListener('dblclick', (e) => { if (isInteractiveHeaderTarget(e.target) || tabletAppsOn()) return; toggleMaximize(el.id); });
       handle.style.touchAction = 'none';
       handle.addEventListener('pointerdown', dragMouseDown);
       makeResizable(el, minTop);
 
       function dragMouseDown(e) {
-        if (e.button !== 0 || isInteractiveHeaderTarget(e.target)) return;
+        if (e.button !== 0 || isInteractiveHeaderTarget(e.target) || tabletAppsOn()) return;
         e.preventDefault();
         rectAnimations.get(el)?.cancel();
         focusPopup(el); isDragging = true; el.style.transition = 'none'; el.style.willChange = 'translate';
@@ -4595,7 +6433,7 @@ snapZone = getSnapZone(pendingX, pendingY);
     const DESKTOP_STYLE_DEFAULTS = {
       accent: '#0a84ff', wallpaperMode: 'image', wallpaperColor: '#1c2333', gradient: 'aurora', fit: 'cover',
       brightness: 100, saturation: 100, blur: 0, radius: 16, glass: 75, iconScale: 100, uiFont: 'Poppins',
-      nightWarmth: 35, nightSchedule: 'off', nightFrom: '21:00', nightTo: '07:00'
+      nightWarmth: 35, nightSchedule: 'off', nightFrom: '21:00', nightTo: '07:00', dockMagnify: false
     };
     const DESKTOP_GRADIENTS = {
       aurora: 'linear-gradient(135deg, #0f2027 0%, #203a43 45%, #2c5364 100%)',
@@ -4636,6 +6474,7 @@ snapZone = getSnapZone(pendingX, pendingY);
         wallpaper.style.backgroundRepeat = `${repeat}, no-repeat`;
         wallpaper.style.backgroundColor = '#05070b';
       }
+      document.body.classList.toggle('dock-magnify', st.dockMagnify === true);
       const blur = Math.max(0, Math.min(30, Number(st.blur) || 0));
       // Dark mode (Functions Lab) dims the wallpaper on top of the user's own adjustments.
       const dark = document.body.classList.contains('lab-dark-mode');
@@ -4652,7 +6491,7 @@ snapZone = getSnapZone(pendingX, pendingY);
       const scale = Math.max(70, Math.min(150, Number(st.iconScale))) / 100;
       const font = String(st.uiFont || 'Poppins').replace(/[^a-z0-9 -]/gi, '');
       const styleText = `
-        .popup:not(.maximized) { border-radius: ${radius}px !important; }
+        body:not(.tablet-apps) .popup:not(.maximized) { border-radius: ${radius}px !important; }
         body:not(.lab-dark-mode):not(.lab-performance) .popup:not(#popup2) { background-color: rgba(18, 22, 32, ${glass}) !important; }
         #desktop-icons .desktop-item { width: ${Math.round(86 * scale)}px; }
         #desktop-icons .desktop-item .desktop-item-icon { font-size: ${Math.round(44 * scale)}px; }
@@ -4892,6 +6731,8 @@ snapZone = getSnapZone(pendingX, pendingY);
         }
       } catch (error) {}
       updateDock(true);
+      try { if (localStorage.getItem(TABLET_KEY) === '1') enterTabletMode(false); } catch (e) {}
+      deskEntrance();
     }
 
     let backendFails = 0;
@@ -5155,6 +6996,7 @@ snapZone = getSnapZone(pendingX, pendingY);
             elToAutoRename = { item, el };
           }
         });
+        deskArrive('icons', [...container.children]);
 
         if (elToAutoRename) {
           selectDesktopItem(elToAutoRename.item, elToAutoRename.el);

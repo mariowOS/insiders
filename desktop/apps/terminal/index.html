@@ -121,6 +121,15 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     .color-yellow { color: #ffbd2e; }
     .color-red { color: #ff5f56; }
     .color-gray { color: #aaaaaa; }
+    /* fetch: the logo beside the report; the report drops below it when the window is narrow. */
+    .fetch { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 28px; margin: 4px 0 8px; }
+    .fetch-logo { white-space: pre; line-height: 1.15; }
+    .fetch-info { min-width: 280px; }
+    .fetch-title { grid-column: 1 / -1; margin: 10px 0 3px; }
+    .fetch-rows { display: grid; grid-template-columns: max-content 1fr; column-gap: 18px; row-gap: 1px; }
+    .fetch-meter { display: inline-block; width: 110px; height: 8px; margin: 0 8px 0 12px; border-radius: 4px; overflow: hidden; vertical-align: middle; background: rgba(255, 255, 255, 0.12); }
+    .fetch-meter > span { display: block; height: 100%; border-radius: 4px; background: currentColor; }
+    .fetch-palette { margin-top: 12px; letter-spacing: -1px; }
     
     /* Command Tables */
     .term-table {
@@ -1859,6 +1868,9 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     }
 
     // --- SYSTEM INFO ---
+    // fetch: the logo beside a report in the same look as the other commands (blue section
+    // titles like help and get, yellow labels), with usage bars and tips for what needs
+    // attention. -s prints one line, -c copies a plain-text report (for bug reports).
     const FETCH_LOGO = [
       "    @@@@@                        ",
       " @@@@@@@@@@@      @@@@@@         ",
@@ -1875,36 +1887,121 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       "   @@@@@@@@@@@                   ",
       "      @@@@@                      "
     ];
+    const fetchT = (key, fallback, vars) => mariowOSI18n.t(`terminal.fetch.${key}`, fallback, vars);
 
-    async function showFetch(tab) {
-      const [info, about, storage] = await Promise.all([
+    // What fetch reports, gathered once; every source is optional except /sysinfo.
+    async function collectFetch() {
+      const optional = (promise, ms = 2500) => Promise.race([promise.catch(() => null), new Promise(resolve => setTimeout(() => resolve(null), ms))]);
+      const [info, about, storage, me, quick, installed] = await Promise.all([
         api("/sysinfo"),
-        api("/api/system/about").catch(() => null),
-        api("/api/system/storage").catch(() => null)
+        optional(api("/api/system/about")),
+        optional(api("/api/system/storage")),
+        optional(api("/api/users/me")),
+        optional(api("/api/system/quick-settings"), 1500),
+        optional(installedApps())
       ]);
-      const electron = (navigator.userAgent.match(/Electron\/([\d.]+)/) || [])[1];
-      const chromium = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1];
-      const details = [
-        "┌──────────Basic Info──────────┐",
-        `OS: ${info.OS}${about ? ` ${about.version}` : ""}`,
-        `Kernel: ${info.Kernel}`,
-        `Uptime: ${formatUptime(info.Uptime)}`,
-        `CPU: ${info.CPU}${info.Cores ? ` (${info.Cores} cores)` : ""}`,
-        `RAM: ${info.RAM}${info.FreeRAM ? ` (Free: ${info.FreeRAM})` : ""}`,
-        storage ? `Storage: ${formatBytes(storage.usedBytes)} / ${formatBytes(storage.totalBytes)} (${Math.round(storage.usagePercent)}% used)` : "Storage: unknown",
-        "",
-        "┌──────────Shell Info──────────┐",
-        `Shell: mariowOS Terminal on ${currentDesktopName()}`,
-        `Build date: ${about ? new Date(about.buildDate).toLocaleString(mariowOSI18n.locale) : "unknown"}`,
-        `Engine: ${electron ? `Electron ${electron}` : "Web browser"}${chromium ? ` / Chromium ${chromium}` : ""}`,
-        `User: ${sysUsername}@mariowos`,
-        "",
-        "© mariowstech and the mariowOS team"
+      const mb = value => (parseInt(value, 10) || 0) * 1048576;
+      const ramTotal = mb(info.RAM), ramFree = mb(info.FreeRAM);
+      const ram = ramTotal ? { used: ramTotal - ramFree, total: ramTotal, percent: (ramTotal - ramFree) / ramTotal * 100 } : null;
+      const disk = storage ? { used: storage.usedBytes, total: storage.totalBytes, percent: storage.usagePercent } : null;
+      const user = me && me.user ? me.user : null;
+      const role = user ? (user.owner ? fetchT("role-owner", "owner") : user.admin ? fetchT("role-admin", "administrator") : fetchT("role-standard", "standard")) : "";
+      let network = fetchT("network-unknown", "unknown");
+      if (quick) {
+        if (quick.isEthernet) network = fetchT("network-ethernet", "Ethernet");
+        else if (quick.wifi === false) network = fetchT("network-wifi-off", "Wi-Fi is off");
+        else if (quick.connectedWifi) network = fetchT("network-wifi", "Wi-Fi · {name}", { name: quick.connectedWifi });
+        else network = fetchT("network-none", "not connected");
+      }
+      let tablet = false;
+      try { tablet = IS_EMBEDDED && window.parent.document.body.classList.contains("tablet-mode"); } catch (error) {}
+      const desktop = currentDesktopName() + (tablet ? ` (${fetchT("tablet-mode", "tablet mode")})` : "");
+      const sections = [
+        { title: fetchT("section-system", "System"), rows: [
+          [fetchT("os", "OS"), `${info.OS}${about ? ` ${about.version}` : ""}`],
+          // The mariowOS kernel and engine (as in Settings > About), then the system it runs on.
+          [fetchT("kernel", "Kernel"), (about && about.kernel) || "1.0-wuhuaguo-mst (node)"],
+          [fetchT("engine", "Engine"), (about && about.engine) || "Lilium Engine"],
+          [fetchT("host-kernel", "Host kernel"), `${info.Kernel}${info.Platform ? ` · ${info.Platform}` : ""}`],
+          [fetchT("build", "Build"), about ? new Date(about.buildDate).toLocaleString(mariowOSI18n.locale) : fetchT("unknown", "unknown")],
+          [fetchT("uptime", "Uptime"), formatUptime(info.Uptime)]
+        ] },
+        { title: fetchT("section-hardware", "Hardware"), rows: [
+          [fetchT("cpu", "CPU"), `${info.CPU}${info.Cores ? ` (${fetchT("cores", "{count} cores", { count: info.Cores })})` : ""}`],
+          [fetchT("memory", "Memory"), ram ? `${formatBytes(ram.used)} / ${formatBytes(ram.total)}` : fetchT("unknown", "unknown"), ram && ram.percent],
+          [fetchT("storage", "Storage"), disk ? `${formatBytes(disk.used)} / ${formatBytes(disk.total)}` : fetchT("unknown", "unknown"), disk && disk.percent]
+        ] },
+        { title: fetchT("section-network", "Network"), rows: [
+          [fetchT("connection", "Connection"), network],
+          [fetchT("bluetooth", "Bluetooth"), quick ? (quick.bluetooth ? fetchT("on", "on") : fetchT("off", "off")) : fetchT("unknown", "unknown")]
+        ] },
+        { title: fetchT("section-session", "Session"), rows: [
+          [fetchT("user", "User"), `${sysUsername}@mariowos${role ? ` (${role})` : ""}`],
+          [fetchT("desktop", "Desktop"), desktop],
+          [fetchT("shell", "Shell"), tabs.length === 1 ? fetchT("shell-one", "mariowOS Terminal · 1 tab") : fetchT("shell-many", "mariowOS Terminal · {count} tabs", { count: tabs.length })],
+          [fetchT("apps", "Store apps"), installed ? fetchT("apps-value", "{count} installed", { count: installed.length }) : fetchT("unknown", "unknown")]
+        ] }
       ];
-      const rows = Math.max(FETCH_LOGO.length, details.length);
-      const lines = [];
-      for (let i = 0; i < rows; i++) lines.push(`${(FETCH_LOGO[i] || "").padEnd(37)}${details[i] || ""}`);
-      printLine(tab, lines.join("\n"));
+      // Only what needs attention, each with the command that helps.
+      const tips = [];
+      if (disk && disk.percent >= 90) tips.push({ level: disk.percent >= 97 ? "color-red" : "color-yellow", text: fetchT("tip-storage", "Storage is {percent}% full. 'ls -l' shows sizes; 'rm' or 'get remove' frees space.", { percent: Math.round(disk.percent) }) });
+      if (ram && ram.percent >= 90) tips.push({ level: "color-yellow", text: fetchT("tip-memory", "Memory is {percent}% used. Closing apps you are not using frees it.", { percent: Math.round(ram.percent) }) });
+      if (quick && !quick.isEthernet && !quick.connectedWifi) tips.push({ level: "color-yellow", text: fetchT("tip-offline", "No network connection: 'get' and the Store need one.") });
+      const summary = [
+        `${sysUsername}@mariowos`,
+        `${info.OS}${about ? ` ${about.version}` : ""}`,
+        `${fetchT("up", "up")} ${formatUptime(info.Uptime)}`,
+        ram ? `${fetchT("memory-short", "RAM")} ${Math.round(ram.percent)}%` : "",
+        disk ? `${fetchT("storage-short", "disk")} ${Math.round(disk.percent)}%` : "",
+        network
+      ].filter(Boolean).join(" · ");
+      return { sections, tips, summary };
+    }
+
+    // A usage bar in the terminal's colours: green, yellow from 70%, red from 90%.
+    function fetchMeter(percent) {
+      const level = percent >= 90 ? "color-red" : percent >= 70 ? "color-yellow" : "color-green";
+      const width = Math.max(0, Math.min(100, percent)).toFixed(1);
+      return `<span class="fetch-meter"><span class="${level}" style="width: ${width}%"></span></span><span class="${level}">${Math.round(percent)}%</span>`;
+    }
+
+    function fetchReportText(data) {
+      return [`mariowOS ${fetchT("report", "system report")} · ${new Date().toLocaleString(mariowOSI18n.locale)}`, ""]
+        .concat(...data.sections.map(section => [`${section.title}:`, ...section.rows.map(([label, value, percent]) => `  ${label}: ${value}${percent != null ? ` (${Math.round(percent)}%)` : ""}`), ""]))
+        .join("\n").trim();
+    }
+
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); return; } catch (error) {}
+      const area = document.createElement("textarea");
+      area.value = text; area.style.position = "fixed"; area.style.opacity = "0";
+      document.body.appendChild(area); area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (!ok) throw new Error(fetchT("copy-failed", "could not copy to the clipboard"));
+    }
+
+    async function showFetch(tab, args) {
+      const flags = args.slice(1);
+      if (flags.some(flag => !["-s", "--short", "-c", "--copy"].includes(flag))) throw usageError("fetch");
+      const data = await collectFetch();
+      if (flags.includes("-s") || flags.includes("--short")) { printLine(tab, data.summary); }
+      if (flags.includes("-c") || flags.includes("--copy")) {
+        await copyText(fetchReportText(data));
+        printLine(tab, `✔ ${fetchT("copied", "System report copied to the clipboard.")}`, "color-green");
+      }
+      if (flags.length) return;
+      // One grid for every section, so the values line up all the way down.
+      const rows = `<div class="fetch-rows">` + data.sections.map(section =>
+        `<div class="fetch-title color-blue">${escapeHtml(section.title)}</div>` +
+        section.rows.map(([label, value, percent]) => `<span class="color-yellow">${escapeHtml(label)}</span><span>${escapeHtml(value)}${percent != null ? fetchMeter(percent) : ""}</span>`).join("")).join("") + `</div>`;
+      const palette = ["color-red", "color-yellow", "color-green", "color-blue", "color-gray", ""].map(c => `<span class="${c}">███</span>`).join("");
+      printHTML(tab,
+        `<div class="fetch"><div class="fetch-logo color-blue">${escapeHtml(FETCH_LOGO.join("\n"))}</div>` +
+        `<div class="fetch-info"><div><span class="color-blue">${escapeHtml(sysUsername)}</span>@<span class="color-blue">mariowos</span></div>` +
+        `<div class="color-gray">${"─".repeat(Math.max(12, sysUsername.length + 9))}</div>${rows}<div class="fetch-palette">${palette}</div></div></div>`);
+      data.tips.forEach(tip => printLine(tab, `! ${tip.text}`, tip.level));
+      printLine(tab, fetchT("footer", "fetch -s prints one line · fetch -c copies this report (handy for bug reports) · © mariowstech and the mariowOS team"), "color-gray");
     }
 
     // --- HELP ---
@@ -1981,7 +2078,10 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       date: { group: "General", usage: "date", desc: mariowOSI18n.t("terminal.cmd.date", "Show the current date and time"), run: tab => printLine(tab, new Date().toString()) },
       uptime: { group: "General", usage: "uptime", desc: mariowOSI18n.t("terminal.cmd.uptime", "Show how long the system has been running"),
         run: async tab => { const info = await api("/sysinfo"); printLine(tab, `up ${formatUptime(info.Uptime)}`); } },
-      fetch: { group: "General", usage: "fetch", desc: mariowOSI18n.t("terminal.cmd.fetch", "Show system information"), run: tab => showFetch(tab) },
+      fetch: { group: "General", usage: "fetch [-s] [-c]", desc: mariowOSI18n.t("terminal.cmd.fetch", "Show system information; -s one line, -c copy a report"),
+        details: mariowOSI18n.t("terminal.cmd.fetch-details", "Shows the system, hardware (with memory and storage usage), network and session, and points out anything that needs attention.\n  -s, --short   one line: user, version, uptime, memory, storage, network\n  -c, --copy    copy a plain-text report to the clipboard, to paste in a bug report"),
+        complete: (tab, index) => index >= 1 ? ["-s", "-c"] : null,
+        run: (tab, args) => showFetch(tab, args) },
       lili: { group: "General", usage: "lili", desc: mariowOSI18n.t("terminal.cmd.lili", "A little easter egg ♥"),
         run: tab => printHTML(tab, `<span class="color-red">  ♥♥♥   ♥♥♥\n ♥♥♥♥♥ ♥♥♥♥♥\n  ♥♥♥♥♥♥♥♥♥\n    ♥♥♥♥♥\n      ♥</span>\n<span class="color-gray">just you and me, i love you lili &lt;3</span>`) },
       exit: { group: "General", usage: "exit", desc: mariowOSI18n.t("terminal.cmd.exit", "Close this tab (the window, if it is the last one)"),

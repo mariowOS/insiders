@@ -132,11 +132,11 @@
     </div>
     <div class="info-row">
       <span class="label" data-i18n="settings.about.kernel">Kernel:</span>
-      <span class="value">1.0-wuhuaguo-mst (node)</span>
+      <span class="value" id="kernelName">1.0-wuhuaguo-mst (node)</span>
     </div>
     <div class="info-row">
       <span class="label" data-i18n="settings.about.engine">Engine:</span>
-      <span class="value">Lillium Engine</span> <!-- lily ti amo -->
+      <span class="value" id="engineName">Lilium Engine</span> <!-- lily ti amo -->
     </div>
     <div class="info-row">
       <span class="label" data-i18n="settings.about.build-date">Build Date:</span>
@@ -178,6 +178,8 @@
       if (!res.ok) return;
       const info = await res.json();
       if (info.version) document.getElementById('systemVersion').textContent = info.version;
+      if (info.kernel) document.getElementById('kernelName').textContent = info.kernel;
+      if (info.engine) document.getElementById('engineName').textContent = info.engine;
       const built = formatBuildDate(info.buildDate);
       if (built) document.getElementById('buildDate').textContent = built;
     } catch (err) {

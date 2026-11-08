@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('mariowOSElectron', Object.freeze({
     }),
     onBrowserOpenTab: callback => ipcRenderer.on('browser:open-tab', (_event, url) => callback(String(url))),
     onBrowserShortcut: callback => ipcRenderer.on('browser:shortcut', (_event, name) => callback(String(name))),
+    // Alt+Tab window switcher: next, prev, commit, cancel (see launcher.js).
+    setPrivacy: on => ipcRenderer.invoke('mariowos:set-privacy', !!on),
+    onShellSwitcher: callback => ipcRenderer.on('shell:switcher', (_event, action) => callback(String(action))),
     // Only answered for the local kernel-recovery.html screen (checked in launcher.js).
     kernelRecovery: Object.freeze({
         getState: () => ipcRenderer.invoke('mariowos:recovery-state'),

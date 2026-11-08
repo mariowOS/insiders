@@ -2974,11 +2974,14 @@ function getBuildDate() {
   return buildDateCache.value;
 }
 
+const MARIOWOS_KERNEL = "1.0-wuhuaguo-mst (node)";
+const MARIOWOS_ENGINE = "Lilium Engine";
 app.get("/api/system/about", (req, res) => {
   let version = "1.0.0";
   try { version = JSON.parse(fs.readFileSync(path.join(__dirname, "version.json"), "utf8")).version || version; } catch (e) {}
   res.set("Cache-Control", "no-store");
-  res.json({ version, buildDate: new Date(getBuildDate()).toISOString() });
+  // kernel and engine are the names Settings > About and the Terminal's fetch show.
+  res.json({ version, buildDate: new Date(getBuildDate()).toISOString(), kernel: MARIOWOS_KERNEL, engine: MARIOWOS_ENGINE });
 });
 
 app.get('/api/system/check-update', async (req, res) => {

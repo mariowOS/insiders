@@ -33,9 +33,11 @@ body {
 
 #desktop-wallpaper {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background: url("/desktop/assets/wallpaper.factory.png") center/cover no-repeat;
+  /* The same picture, from the same address, as the desktop: it is already loaded when the desktop opens. */
+  background: url("/desktop/assets/wallpaper.user.png") center/cover no-repeat, url("/desktop/assets/wallpaper.factory.png") center/cover no-repeat, #05070b;
   z-index: -100;
 }
+body.live-wallpaper-active #desktop-wallpaper { display: none; }
 
 /* --- LIVE WALLPAPER CSS EFFECT --- */
 body.live-wallpaper-active {
@@ -72,7 +74,6 @@ body.live-wallpaper-active {
 .datetime {
   position:absolute; top: 0; left: 0; width:100%; text-align:center; pointer-events:none;
   transform: translate3d(0, 120px, 0); 
-  animation: datetimeRiseUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
   will-change: transform, opacity;
 }
 
@@ -90,7 +91,7 @@ body.live-wallpaper-active {
 .center-stack {
   position: absolute; bottom: 160px; left: 50%; transform: translate3d(-50%, 0, 0);
   display: flex; flex-direction: column; align-items: center; gap: 20px;
-  animation: loginRiseUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.25s both; will-change: transform, opacity;
+  will-change: transform, opacity;
 }
 .center-stack.unlock-falling { animation: fallDownExit 0.32s cubic-bezier(0.32, 0, 0.67, 0) forwards !important; }
 
@@ -105,7 +106,7 @@ body.live-wallpaper-active {
 .login-name:empty { display: none; }
 /* Other accounts, bottom left: pick who signs in. */
 @keyframes switcherRise { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: none; } }
-.user-switcher { position: absolute; left: 28px; bottom: 28px; display: flex; flex-direction: column; gap: 6px; animation: switcherRise 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both; }
+.user-switcher { position: absolute; left: 28px; bottom: 28px; display: flex; flex-direction: column; gap: 6px; }
 .user-switcher[hidden] { display: none; }
 .user-choice { display: flex; align-items: center; gap: 12px; min-width: 210px; padding: 8px 16px 8px 8px; border: 0; border-radius: 14px; background: rgba(0,0,0,0.18); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: #fff; font: 500 14px 'Poppins', sans-serif; text-align: left; cursor: pointer; transition: background 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .user-choice:hover { background: rgba(255,255,255,0.16); }
@@ -263,6 +264,42 @@ const loginStatus = document.getElementById('loginStatus');
 const datetimeBlock = document.getElementById('datetimeBlock');
 const centerStackBlock = document.getElementById('centerStackBlock');
 
+// --- Motion, the same as the desktop's (HarmonyOS style): one spring for everything ---
+// Arriving, the wallpaper settles from a slight zoom while the clock, the sign-in controls and
+// the accounts rise into place one after another. Unlocking plays it the other way: the clock
+// and controls lift away while the wallpaper leans in, and the desktop then settles from that
+// same zoom, so the hand-over is one continuous move.
+const LOGIN_EASE = (() => {
+  const zeta = 0.86, omega = 8.2, damped = omega * Math.sqrt(1 - zeta * zeta), points = [];
+  for (let i = 0; i <= 48; i++) {
+    const t = i / 48;
+    points.push((1 - Math.exp(-zeta * omega * t) * (Math.cos(damped * t) + (zeta * omega / damped) * Math.sin(damped * t))).toFixed(4));
+  }
+  points[48] = '1';
+  return CSS.supports('animation-timing-function', 'linear(0, 1)') ? `linear(${points.join(', ')})` : 'cubic-bezier(0.2, 0.9, 0.1, 1)';
+})();
+const LOGIN_ZOOM = '1.08';
+const loginStill = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function loginPlay(el, frames, ms, delay = 0, easing = LOGIN_EASE, fill = 'backwards') {
+  if (!el || loginStill) return null;
+  return el.animate(frames, { duration: ms, delay, easing, fill });
+}
+(function loginArrive() {
+  const wall = document.getElementById('desktop-wallpaper');
+  loginPlay(wall, [{ scale: LOGIN_ZOOM }, { scale: '1' }], 1000);
+  loginPlay(datetimeBlock, [{ transform: 'translate3d(0, 170px, 0) scale(0.92)', opacity: 0 }, { opacity: 1, offset: 0.35 }, { transform: 'translate3d(0, 120px, 0)', opacity: 1 }], 820, 80);
+  loginPlay(centerStackBlock, [{ transform: 'translate3d(-50%, 56px, 0) scale(0.94)', opacity: 0 }, { opacity: 1, offset: 0.35 }, { transform: 'translate3d(-50%, 0, 0)', opacity: 1 }], 820, 200);
+  loginPlay(document.getElementById('userSwitcher'), [{ transform: 'translateY(40px)', opacity: 0 }, { opacity: 1, offset: 0.4 }, { transform: 'none', opacity: 1 }], 820, 300);
+})();
+function loginLeave() {
+  const out = 'cubic-bezier(0.4, 0, 0.6, 1)';
+  loginPlay(datetimeBlock, [{ transform: 'translate3d(0, 120px, 0)', opacity: 1 }, { transform: 'translate3d(0, 70px, 0) scale(1.06)', opacity: 0 }], 320, 0, out, 'forwards');
+  loginPlay(centerStackBlock, [{ transform: 'translate3d(-50%, 0, 0)', opacity: 1 }, { transform: 'translate3d(-50%, 30px, 0) scale(0.94)', opacity: 0 }], 280, 0, out, 'forwards');
+  loginPlay(document.getElementById('userSwitcher'), [{ opacity: 1 }, { transform: 'translateY(24px)', opacity: 0 }], 260, 0, out, 'forwards');
+  loginPlay(document.getElementById('desktop-wallpaper'), [{ scale: '1' }, { scale: LOGIN_ZOOM }], 420, 0, LOGIN_EASE, 'forwards');
+  return new Promise(r => setTimeout(r, loginStill ? 0 : 340));
+}
+
 passwordInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') attemptUnlock();
 });
@@ -291,11 +328,7 @@ async function attemptUnlock() {
     }
 
     document.body.classList.add('unlocking');
-    datetimeBlock.classList.add('unlock-falling');
-    centerStackBlock.classList.add('unlock-falling');
-    setTimeout(() => {
-      window.location.href = '/desktop/com.mariowos.desktop.html';
-    }, 360);
+    loginLeave().then(() => { window.location.href = '/desktop/com.mariowos.desktop.html'; });
   } catch (error) {
     loginStatus.textContent = mariowOSI18n.t('login.unreachable', 'Unable to reach mariowOS. Please try again.');
     console.error('Could not verify lockscreen password:', error);

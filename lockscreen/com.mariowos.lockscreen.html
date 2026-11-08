@@ -39,9 +39,11 @@ body {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: url("/desktop/assets/wallpaper.factory.png") center/cover no-repeat;
+  /* The same picture, from the same address, as the desktop behind it. */
+  background: url("/desktop/assets/wallpaper.user.png") center/cover no-repeat, url("/desktop/assets/wallpaper.factory.png") center/cover no-repeat, #05070b;
   z-index: -100;
 }
+body.live-wallpaper-active #desktop-wallpaper { display: none; }
 
 /* --- LIVE WALLPAPER CSS EFFECT --- */
 body.live-wallpaper-active {
@@ -85,7 +87,6 @@ body.live-wallpaper-active.lock-standby { animation-play-state: paused !importan
   text-align: center;
   pointer-events: none;
   transform: translate3d(0, 100px, 0); 
-  animation: datetimeRiseUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
   will-change: transform, opacity;
 }
 
@@ -118,7 +119,6 @@ body.live-wallpaper-active.lock-standby { animation-play-state: paused !importan
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  animation: loginRiseUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.25s both;
   will-change: transform, opacity;
   width: 360px;
   max-width: calc(100vw - 32px);
@@ -540,6 +540,42 @@ const loginStatus = document.getElementById('loginStatus');
 const datetimeBlock = document.getElementById('datetimeBlock');
 const centerStackBlock = document.getElementById('centerStackBlock');
 
+// --- Motion, the same as the desktop's and the sign-in screen's (HarmonyOS style) ---
+// Locking: the wallpaper settles from a slight zoom while the clock and the controls rise into
+// place. Unlocking: the clock lifts away, the controls drop, the wallpaper leans in, and the
+// desktop then settles from that same zoom with everything on it (open windows included).
+const LOCK_EASE = (() => {
+  const zeta = 0.86, omega = 8.2, damped = omega * Math.sqrt(1 - zeta * zeta), points = [];
+  for (let i = 0; i <= 48; i++) {
+    const t = i / 48;
+    points.push((1 - Math.exp(-zeta * omega * t) * (Math.cos(damped * t) + (zeta * omega / damped) * Math.sin(damped * t))).toFixed(4));
+  }
+  points[48] = '1';
+  return CSS.supports('animation-timing-function', 'linear(0, 1)') ? `linear(${points.join(', ')})` : 'cubic-bezier(0.2, 0.9, 0.1, 1)';
+})();
+const LOCK_ZOOM = '1.08';
+const lockStill = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const lockLayers = () => [document.getElementById('desktop-wallpaper'), datetimeBlock, centerStackBlock];
+function lockPlay(el, frames, ms, delay = 0, easing = LOCK_EASE, fill = 'backwards') {
+  if (!el || lockStill()) return null;
+  return el.animate(frames, { duration: ms, delay, easing, fill });
+}
+function lockArrive() {
+  lockLayers().forEach(el => el.getAnimations().forEach(a => a.cancel()));
+  lockPlay(document.getElementById('desktop-wallpaper'), [{ scale: LOCK_ZOOM }, { scale: '1' }], 1000);
+  lockPlay(datetimeBlock, [{ transform: 'translate3d(0, 150px, 0) scale(0.92)', opacity: 0 }, { opacity: 1, offset: 0.35 }, { transform: 'translate3d(0, 100px, 0)', opacity: 1 }], 820, 60);
+  lockPlay(centerStackBlock, [{ transform: 'translate3d(-50%, 56px, 0) scale(0.94)', opacity: 0 }, { opacity: 1, offset: 0.35 }, { transform: 'translate3d(-50%, 0, 0)', opacity: 1 }], 820, 170);
+}
+function lockLeave() {
+  const out = 'cubic-bezier(0.4, 0, 0.6, 1)';
+  lockLayers().forEach(el => el.getAnimations().forEach(a => a.cancel()));
+  lockPlay(datetimeBlock, [{ transform: 'translate3d(0, 100px, 0)', opacity: 1 }, { transform: 'translate3d(0, 50px, 0) scale(1.06)', opacity: 0 }], 320, 0, out, 'forwards');
+  lockPlay(centerStackBlock, [{ transform: 'translate3d(-50%, 0, 0)', opacity: 1 }, { transform: 'translate3d(-50%, 30px, 0) scale(0.94)', opacity: 0 }], 280, 0, out, 'forwards');
+  lockPlay(document.getElementById('desktop-wallpaper'), [{ scale: '1' }, { scale: LOCK_ZOOM }], 420, 0, LOCK_EASE, 'forwards');
+  return new Promise(r => setTimeout(r, lockStill() ? 0 : 340));
+}
+lockArrive();
+
 passwordInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') attemptUnlock();
 });
@@ -572,9 +608,10 @@ async function attemptUnlock() {
       return;
     }
 
-    // Inside the desktop the whole screen slides up as one sheet, so nothing here moves on its own.
+    // Inside the desktop: play the way out here, then the desktop arrives behind it.
     if (window.parent && window.parent !== window) {
       passwordInput.value = '';
+      await lockLeave();
       window.parent.postMessage({ type: 'lockscreen-unlocked' }, '*');
       if (typeof window.parent.unlockDesktop === 'function') {
         try { window.parent.unlockDesktop(); } catch (e) {}
@@ -583,13 +620,10 @@ async function attemptUnlock() {
     }
 
     document.body.classList.add('unlocking');
-    datetimeBlock.classList.add('unlock-falling');
-    centerStackBlock.classList.add('unlock-falling');
-
-    setTimeout(() => {
+    lockLeave().then(() => {
       passwordInput.value = '';
       window.location.href = '/desktop/com.mariowos.desktop.html';
-    }, 360);
+    });
   } catch (error) {
     loginStatus.textContent = mariowOSI18n.t('login.unreachable', 'Unable to reach mariowOS. Please try again.');
     console.error('Could not verify lockscreen password:', error);
@@ -725,6 +759,7 @@ window.addEventListener('message', (e) => {
     document.body.classList.remove('unlocking');
     datetimeBlock.classList.remove('unlock-falling');
     centerStackBlock.classList.remove('unlock-falling');
+    lockArrive();
     unlockPill.classList.remove('wrong');
     loginStatus.textContent = '';
     passwordInput.disabled = false;

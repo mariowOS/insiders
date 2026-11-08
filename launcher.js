@@ -1,6 +1,6 @@
 // mariowOS Electron entry point. The backend owns the web shell; Electron owns
 // the fullscreen window and supervises the backend's explicit lifecycle codes.
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, Menu } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -132,6 +132,15 @@ ipcMain.handle('mariowos:shutdown', async (event) => {
         timeoutMs: 3000
     });
     return { accepted: true };
+});
+
+// Privacy mode: while it is on, screenshots, screen recordings and screen sharing see
+// mariowOS as a blank window (Windows and macOS honour this; elsewhere it does nothing).
+ipcMain.handle('mariowos:set-privacy', (event, on) => {
+    if (!isTrustedRendererEvent(event)) throw new Error('privacy request rejected for an untrusted renderer');
+    if (!mainWindow || mainWindow.isDestroyed()) return { protected: false };
+    mainWindow.setContentProtection(!!on);
+    return { protected: !!on && (process.platform === 'win32' || process.platform === 'darwin') };
 });
 
 ipcMain.handle('mariowos:clear-browser-data', async (event) => {
@@ -581,6 +590,20 @@ function bootMariowOS() {
             sandbox: true
         }
     });
+    // Windows can put its taskbar back over a fullscreen frameless window (after a focus change,
+    // or an edge swipe on touch screens), covering the shell's own bottom bar. While the shell
+    // is the active window it stays above the taskbar; once another app is active it steps back.
+    mainWindow.on('focus', () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.setAlwaysOnTop(true, 'screen-saver');
+        if (!mainWindow.isFullScreen()) mainWindow.setFullScreen(true);
+        claimSwitcherKeys(true);
+    });
+    mainWindow.on('blur', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false);
+        claimSwitcherKeys(false);
+    });
+    mainWindow.webContents.on('before-input-event', switcherInput);
     mainWindow.webContents.on('context-menu', event => event.preventDefault());
     blockMouseHistoryNavigation(mainWindow);
     // The shell must never navigate "back" (boot -> login -> desktop): Chromium can still
@@ -599,6 +622,49 @@ function bootMariowOS() {
         console.error('[sniffer]: could not load boot animation:', error);
     });
 }
+
+// --- Alt+Tab: the desktop's window switcher ---
+// Windows keeps Alt+Tab for itself, so while mariowOS is the active window it claims the
+// combination (and gives it back the moment another app is active). The keys that follow
+// (more Tabs, the arrows, Esc, letting go of Alt) are read here too, because keyboard focus
+// inside an app or a Browser page never reaches the desktop page.
+let switcherActive = false, lastSwitcherStep = 0;
+function sendSwitcher(action) {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (action === 'next' || action === 'prev') {
+        const now = Date.now();
+        if (now - lastSwitcherStep < 25) return; // the same press seen by both routes
+        lastSwitcherStep = now;
+        switcherActive = true;
+    } else {
+        if (!switcherActive) return;
+        switcherActive = false;
+    }
+    mainWindow.webContents.send('shell:switcher', action);
+}
+function switcherInput(event, input) {
+    const key = (input.key || '').toLowerCase();
+    if (input.type === 'keyDown' && input.alt && key === 'tab') { event.preventDefault(); sendSwitcher(input.shift ? 'prev' : 'next'); return; }
+    if (!switcherActive) return;
+    if (input.type === 'keyDown' && key === 'escape') { event.preventDefault(); sendSwitcher('cancel'); }
+    else if (input.type === 'keyDown' && (key === 'arrowleft' || key === 'arrowright')) { event.preventDefault(); sendSwitcher(key === 'arrowleft' ? 'prev' : 'next'); }
+    else if (input.type === 'keyUp' && key === 'alt') { event.preventDefault(); sendSwitcher('commit'); }
+}
+function claimSwitcherKeys(claim) {
+    try {
+        if (claim) {
+            if (!globalShortcut.isRegistered('Alt+Tab')) globalShortcut.register('Alt+Tab', () => sendSwitcher('next'));
+            if (!globalShortcut.isRegistered('Alt+Shift+Tab')) globalShortcut.register('Alt+Shift+Tab', () => sendSwitcher('prev'));
+        } else {
+            globalShortcut.unregister('Alt+Tab');
+            globalShortcut.unregister('Alt+Shift+Tab');
+            if (switcherActive) sendSwitcher('cancel');
+        }
+    } catch (error) {
+        console.error('[sniffer]: could not claim Alt+Tab:', error.message);
+    }
+}
+app.on('will-quit', () => globalShortcut.unregisterAll());
 
 // SECURITY (B-01): webviewTag is enabled for the in-OS browser app, so every webview
 // and every attempt to open a new window must be constrained. Without this, a page
@@ -625,6 +691,7 @@ app.on('web-contents-created', (_event, contents) => {
     // Keyboard focus inside a webview never reaches the desktop page, so browser
     // shortcuts are intercepted here and forwarded to it.
     if (isWebview) {
+        contents.on('before-input-event', switcherInput);
         contents.on('dom-ready', () => contents.executeJavaScript(WEBVIEW_MOUSE_NAV).catch(() => {}));
         contents.on('before-input-event', (event, input) => {
             if (input.type !== 'keyDown') return;
@@ -648,8 +715,21 @@ function browserShortcutFor(input) {
         '=': 'zoom-in', '+': 'zoom-in', '-': 'zoom-out', '0': 'zoom-reset' }[key] || null;
 }
 
+// Electron's default menu, minus Close Window: its Ctrl+W shut the whole of mariowOS. Inside
+// mariowOS that key belongs to the apps (the Terminal and the Browser close a tab with it).
+// Editing shortcuts, reload and the developer tools stay as they were.
+function installAppMenu() {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+        ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+        { role: 'editMenu' },
+        { role: 'viewMenu' },
+        { label: 'Window', submenu: [{ role: 'minimize' }] }
+    ]));
+}
+
 app.whenReady().then(async () => {
     console.log('[sniffer]: booting...');
+    installAppMenu();
     await browserExtensions.init().catch(error => console.error('[browser]: extensions did not load:', error.message));
     bootMariowOS();
 

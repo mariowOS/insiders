@@ -1,0 +1,14 @@
+{
+  "fromVersion": "2.0.0_DEVPREVIEW1",
+  "toVersion": "2.5.1_DEVPREVIEW1",
+  "createdAt": "2026-11-09T07:34:15.173Z",
+  "verified": true,
+  "rolledBack": false,
+  "replaced": [
+    "launcher.js",
+    "lib/update-checks.js",
+    "server.js",
+    "version.json"
+  ],
+  "created": []
+}

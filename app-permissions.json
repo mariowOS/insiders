@@ -4,6 +4,7 @@
   "rules": [
     { "prefix": "/api/remote/exec", "apps": ["terminal"] },
     { "prefix": "/api/recovery/debug", "apps": ["terminal"] },
+    { "prefix": "/api/terminal/", "apps": ["terminal"] },
     { "prefix": "/api/sandbox/", "apps": ["sandbox"] },
     { "prefix": "/api/store/", "apps": ["store"] }
   ]

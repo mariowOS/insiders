@@ -47,8 +47,9 @@ const app = express();
 // built on inline code — removing it is a separate, larger refactor together with
 // sanitising the innerHTML sinks). What it DOES buy right now:
 //   - connect-src 'self'  -> a successful XSS cannot exfiltrate data to a remote
-//                            server or beacon out; every app already talks only to
-//                            same-origin /api/* routes (the backend proxies outward).
+//                            server or beacon out; every app talks to same-origin
+//                            /api/* routes (the backend proxies outward), except the
+//                            Weather app's few public weather APIs, allowed by host.
 //   - script-src pinned   -> no stage-2 payload can be pulled from an attacker CDN;
 //                            only self + the CDN the OS genuinely uses are allowed.
 //   - object-src 'none', base-uri 'self', frame-ancestors 'self' -> kill <object>/
@@ -70,7 +71,11 @@ const CONTENT_SECURITY_POLICY = [
   "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob:",
-  "connect-src 'self'",
+  // The Weather app (first-party, from mariowstech/weather, so it runs on this origin)
+  // fetches keyless public APIs straight from the page: Open-Meteo for the forecast,
+  // air quality and city search, BigDataCloud to name the city behind "locate me".
+  // Only those exact hosts are allowed, so an XSS still cannot beacon anywhere else.
+  "connect-src 'self' https://api.open-meteo.com https://air-quality-api.open-meteo.com https://geocoding-api.open-meteo.com https://api.bigdatacloud.net",
   // External iframes the shell embeds (homepage, chat widgets) are https only; the
   // browser app itself uses a <webview>, not an iframe, so it is not constrained here.
   `frame-src 'self' https: ${APPS_ORIGIN}`,
@@ -349,15 +354,15 @@ const users = createUsers({ baseDir: __dirname, getConfig: () => config, saveCon
 // Standard (non-admin) accounts: whatever installs software, runs commands or changes the
 // system for everyone belongs to administrators. Enforced here, whatever the UI shows.
 const ADMIN_ONLY_ROUTES = [
-  /^\/api\/store\/(install|uninstall|do-upgrade|publish|eula)\b/,
-  /^\/api\/remote\/exec\b/, /^\/api\/sandbox\//, /^\/api\/recovery\//,
+  /^\/api\/store\/(install|uninstall|do-upgrade|publish|eula|sideload)\b/,
+  /^\/api\/remote\/exec\b/, /^\/api\/terminal\//, /^\/api\/sandbox\//, /^\/api\/recovery\//,
   /^\/api\/system\/(factory-reset|reset-settings|reset-desktop|restore|backup|boot-logo|update-channel|keyring|ota-update|sota-update)\b/,
   /^\/api\/users\/(create|update|delete|reset-password)\b/,
   /^\/api\/rules\/(save|enabled)\b/,
   /^\/(save-settings|clear-settings|set-password|clear-password|upload-wallpaper)$/
 ];
 // Reading is fine, except where the read itself acts or hands out secrets.
-const ADMIN_ONLY_READS = /^\/api\/system\/(backup|keyring|ota-update|sota-update)\b/;
+const ADMIN_ONLY_READS = /^\/api\/(system\/(backup|keyring|ota-update|sota-update)\b|terminal\/)/;
 function requireAdminFor(req, res, next) {
   if (req.user?.admin || !ADMIN_ONLY_ROUTES.some(route => route.test(req.path))) return next();
   if ((req.method === "GET" || req.method === "HEAD") && !ADMIN_ONLY_READS.test(req.path)) return next();
@@ -462,6 +467,8 @@ const requireAuthJson = (req, res, next) => (!config.passwordHash || hasValidSes
 require("./media-session").registerMediaSessionRoutes(app, { requireAuth: requireAuthJson });
 require("./bluetooth-watch").registerBluetoothWatchRoutes(app, { requireAuth: requireAuthJson });
 require("./online-services").registerOnlineServiceRoutes(app, { getConfig: () => config, saveConfig, requireAuth: requireAuthJson });
+// curl, telnet, ping, nslookup and ifconfig for the Terminal (administrators only, see above).
+require("./lib/terminal-net").registerTerminalNetRoutes(app, { requireAuth: requireAuthJson, resolveHomeEntry });
 
 app.get('/api/system/health', (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -1929,6 +1936,12 @@ const installProgress = {};
 function isValidAppId(appId) {
   return typeof appId === 'string' && /^[a-zA-Z0-9_-]+$/.test(appId);
 }
+// A folder in desktop/apps that the Store did not put there is part of the OS (terminal,
+// settings...): installing over it would delete it, so that ID is refused.
+function isBuiltInAppId(appId) {
+  if ((config.installedApps || []).some(app => app.appId === appId)) return false;
+  return fs.existsSync(path.join(__dirname, "desktop", "apps", appId));
+}
 
 app.post("/api/store/install", async (req, res) => {
   // This is the installation pipeline used by the app store.
@@ -1936,6 +1949,7 @@ app.post("/api/store/install", async (req, res) => {
   // it inside the desktop shell so it behaves like a native mariowOS app.
   const { appId, title, icon, repoUrl } = req.body;
   if (!isValidAppId(appId)) return res.status(400).json({ success: false, error: "Invalid app ID" });
+  if (isBuiltInAppId(appId)) return res.status(409).json({ success: false, error: `"${appId}" is a built-in app and cannot be replaced` });
   // SECURITY (A-07 adjacent): only install from an https github.com URL.
   if (!isAllowedRepoUrl(repoUrl)) {
     return res.status(400).json({ success: false, error: "Only https github.com repository URLs are allowed." });
@@ -2027,9 +2041,60 @@ app.post("/api/store/install", async (req, res) => {
   }
 });
 
+// Sideload: install an app from a folder (with an index.html) or a single .html file in
+// the administrator's home, e.g. "store add ~/Projects/myapp" in the Terminal. The app is
+// recorded with a "local:" source, so it counts as third-party and runs isolated on its
+// own origin like any app not published by the mariowOS team.
+app.post("/api/store/sideload", (req, res) => {
+  const { appId, title, icon } = req.body || {};
+  if (!isValidAppId(appId)) return res.status(400).json({ success: false, error: "Invalid app ID (use letters, digits, - and _)" });
+  if (appId === "tiles") return res.status(400).json({ success: false, error: "This ID is reserved" });
+  if (isBuiltInAppId(appId)) return res.status(409).json({ success: false, error: `"${appId}" is a built-in app and cannot be replaced` });
+  const sourcePath = typeof req.body.path === "string" ? req.body.path : "";
+  const resolved = resolveVirtualPath(sourcePath);
+  if (!resolved || resolved.isReadOnly || !resolved.realPath || !(sourcePath === "/home" || sourcePath.startsWith("/home/"))) {
+    return res.status(403).json({ success: false, error: "Apps can only be installed from your home partition" });
+  }
+  let stats;
+  try { stats = fs.statSync(resolved.realPath); } catch (e) { return res.status(404).json({ success: false, error: `${sourcePath}: no such file or directory` }); }
+  const target = path.join(__dirname, "desktop", "apps", appId);
+  try {
+    if (stats.isDirectory()) {
+      if (!fs.existsSync(path.join(resolved.realPath, "index.html"))) return res.status(400).json({ success: false, error: `${sourcePath} has no index.html` });
+      fs.rmSync(target, { recursive: true, force: true });
+      fs.cpSync(resolved.realPath, target, { recursive: true, filter: source => !/[\\/](\.git|node_modules)([\\/]|$)/.test(source) });
+    } else {
+      if (!/\.html?$/i.test(resolved.realPath)) return res.status(400).json({ success: false, error: "Choose a folder with an index.html, or an .html file" });
+      fs.rmSync(target, { recursive: true, force: true });
+      fs.mkdirSync(target, { recursive: true });
+      fs.copyFileSync(resolved.realPath, path.join(target, "index.html"));
+    }
+  } catch (e) {
+    return res.status(500).json({ success: false, error: `Could not copy the app: ${e.message}` });
+  }
+  // An icon.png next to index.html becomes the app icon (copied to the shared assets,
+  // since an isolated app's own files are not served on the shell's origin).
+  let appIcon = typeof icon === "string" && icon.trim() ? icon.trim().slice(0, 300) : "📦";
+  const iconFile = path.join(target, "icon.png");
+  if ((!icon || !String(icon).trim()) && fs.existsSync(iconFile)) {
+    const fileName = `icon_${appId}_${Date.now()}.png`;
+    try { fs.copyFileSync(iconFile, path.join(__dirname, "desktop/assets", fileName)); appIcon = `/desktop/assets/${fileName}`; } catch (e) {}
+  }
+  const appTitle = typeof title === "string" && title.trim() ? title.trim().slice(0, 80) : appId;
+  const repoUrl = `local:${sourcePath}`;
+  if (!config.installedApps) config.installedApps = [];
+  const existing = config.installedApps.find(app => app.appId === appId);
+  const version = readInstalledAppVersion(appId);
+  if (existing) Object.assign(existing, { title: appTitle, icon: appIcon, repoUrl, version: version || null });
+  else config.installedApps.push({ appId, title: appTitle, icon: appIcon, url: `apps/${appId}/index.html`, repoUrl, version: version || null });
+  fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
+  res.json({ success: true, app: { appId, title: appTitle, icon: appIcon, url: `apps/${appId}/index.html` }, updated: !!existing });
+});
+
 app.post("/api/store/uninstall", (req, res) => {
   const { appId } = req.body;
   if (!isValidAppId(appId)) return res.status(400).json({ success: false, error: "Invalid app ID" });
+  if (isBuiltInAppId(appId)) return res.status(409).json({ success: false, error: `"${appId}" is a built-in app and cannot be removed` });
 
   const targetPath = path.join(__dirname, "desktop/apps", appId);
   if (fs.existsSync(targetPath)) fs.rmSync(targetPath, { recursive: true, force: true });
@@ -3007,9 +3072,11 @@ app.get('/api/system/check-update', async (req, res) => {
       return res.json({ updateAvailable: false, current: local, latest: remote.version, blocked: true,
         error: `Version ${remote.version} was rolled back because it did not start. Waiting for a fixed release.` });
     }
+        const installedChannel = config.installedChannel || (/[_-][A-Za-z]/.test(String(local)) ? "insiders" : channel);
+    const channelSwitched = installedChannel !== channel && remote.version !== local;
     res.json(
-      isNewerVersion(remote.version, local)
-        ? { updateAvailable: true, current: local, latest: remote.version, changelog: remote.changelog }
+      (isNewerVersion(remote.version, local) || channelSwitched)
+        ? { updateAvailable: true, current: local, latest: remote.version, changelog: remote.changelog, channelSwitch: channelSwitched }
         : { updateAvailable: false, current: local, latest: remote.version }
     );
   } catch (error) { 
@@ -3072,6 +3139,7 @@ app.get('/api/system/ota-update', (req, res) => {
         try {
           await launchServerReplacement(stagePath, serverUpdate.mode);
           transaction.commit();
+                  config.installedChannel = channel; saveConfig();
         } catch (error) {
           transaction.rollback();
           throw error;
@@ -3081,6 +3149,7 @@ app.get('/api/system/ota-update', (req, res) => {
         setTimeout(() => process.exit(SERVER_EXIT_CODES.UPDATE_RESTART), 300);
       } else {
         transaction.commit();
+                config.installedChannel = channel; saveConfig();
         fs.rmSync(stagePath, { recursive: true, force: true });
         send(100, "Update complete. No server restart is required.", true);
         res.end();

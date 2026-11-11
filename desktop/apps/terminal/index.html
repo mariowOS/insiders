@@ -240,6 +240,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     </div>
   </div>
 
+  <script src="shell.js"></script>
   <script>
     // SECURITY (M-06): safe arithmetic evaluator for the `math` command. Tokenizes
     // numbers and + - * / % ( ) only, then evaluates via shunting-yard. Anything else
@@ -292,9 +293,14 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     let sysUsername = "user";
     let cursorVisible = true;
     let globalCatalog = [];
-    // Returned by a command step that opened its own prompt (password, question, nano...).
+    // Returned by a command that leaves no prompt behind (exit closed the tab, the desktop
+    // is being switched...).
     const KEEP_PROMPT = Symbol("keep-prompt");
+    // Extra help pages (help mwex...), filled in by commands.js.
+    const HELP_TOPICS = {};
     let nanoTarget = null;
+    let nanoDone = null;
+    let dmgrDone = null;
     let nanoOriginalContent = "";
     let nanoConfirmDiscard = false;
     let nanoMode = "edit";
@@ -478,19 +484,24 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         completion: null,
         previousDirectory: null,
         history: [], historyIndex: 0, historyDraft: "", inputBuffer: "", currentInput: null, currentCursor: null, currentPrediction: null,
-        awaitingPassword: false, authCallback: null, authLabel: "", passwordBuffer: "",
-        pendingConfirm: null, busy: false
+        awaitingPassword: false, passwordBuffer: "", busy: false,
+        // The shell behind this tab, where its output goes right now, a pending
+        // question (password, yes/no, read), a command still being typed over several
+        // lines, and what Ctrl+C has to stop.
+        shell: null, io: null, inputRequest: null, pendingSource: "",
+        interrupted: false, interruptHandlers: new Set(), keepPrompt: false, runId: 0, authRunId: -1
       };
       tabState.history = loadStoredHistory();
       tabState.historyIndex = tabState.history.length;
-      
+      tabState.shell = createShell(tabState);
+
       tabs.push(tabState);
       if (tabsContainer) {
         const btn = buildTabElement(id, name, "transparent");
         tabsContainer.appendChild(btn);
       }
-      
-      newPrompt(tabState);
+
+      runTask(tabState, () => loadStartupFile(tabState));
       switchTab(id);
       if (IS_EMBEDDED) window.parent.postMessage({ type: "terminal-ready" }, window.location.origin);
     }
@@ -547,7 +558,9 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     }
 
     // --- INITIALIZATION ---
-    fetch("/get-settings").then(res => res.json()).then(config => {
+    // The first tab opens once commands.js (loaded after this script) has added its commands.
+    const pageReady = new Promise(resolve => document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", resolve, { once: true }) : resolve());
+    Promise.all([fetch("/get-settings").then(res => res.json()), pageReady]).then(([config]) => {
         // Terminal is for administrators (Settings > Users); the server refuses commands too.
         if (config.currentUser && !config.currentUser.admin) {
             terminalsContainer.innerHTML = `
@@ -571,7 +584,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         if (config.username) sysUsername = config.username.toLowerCase().replace(/\s+/g, '');
         fetch("/api/store/catalog").then(r=>r.json()).then(c => globalCatalog = c).catch(()=>{});
         createTab("bash");
-    }).catch(() => createTab("bash"));
+    }).catch(() => pageReady.then(() => createTab("bash")));
 
 
     setInterval(() => {
@@ -586,7 +599,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     function updatePrediction(tab) {
       if (!tab.currentPrediction) return;
       const input = tab.inputBuffer;
-      if (!input || tab.awaitingPassword || tab.pendingConfirm) {
+      if (!input || tab.awaitingPassword || tab.inputRequest || tab.pendingSource) {
         tab.currentPrediction.textContent = "";
         return;
       }
@@ -701,8 +714,10 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         const lower = key.toLowerCase();
         if (lower === "t") { e.preventDefault(); createTab(); return; }
         if (lower === "w") { e.preventDefault(); closeTab(tab.id); return; }
-        if (lower === "l") { e.preventDefault(); if (!tab.busy) { clearScreen(tab); newPrompt(tab); } return; }
+        if (lower === "l") { e.preventDefault(); if (!tab.busy && !tab.inputRequest) { clearScreen(tab); newPrompt(tab, tab.pendingSource ? `<span class="color-gray">&gt;&nbsp;</span>` : null); } return; }
         if (lower === "c") { if (hasTextSelection()) return; e.preventDefault(); cancelLine(tab); return; }
+        // Ctrl+] is telnet's escape key: it ends the connection, like Ctrl+C.
+        if (key === "]" || e.code === "BracketRight") { e.preventDefault(); if (tab.busy || tab.inputRequest) cancelLine(tab); return; }
         if (lower === "u") {
           e.preventDefault();
           if (!tab.busy) { tab.inputBuffer = ""; tab.passwordBuffer = ""; tab.completion = null; renderInput(tab); }
@@ -716,7 +731,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       if (!tab.currentInput || tab.busy) return;
 
       if (key === "Tab") {
-        if (!tab.awaitingPassword && !tab.pendingConfirm) completeInput(tab);
+        if (!tab.awaitingPassword && !tab.inputRequest) completeInput(tab);
         return;
       }
 
@@ -741,12 +756,12 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         submitLine(tab);
         return;
       } else if (key === "ArrowUp") {
-        if (tab.awaitingPassword || tab.pendingConfirm || !tab.history.length) return;
+        if (tab.awaitingPassword || tab.inputRequest || !tab.history.length) return;
         tab.completion = null;
         if (tab.historyIndex >= tab.history.length) tab.historyDraft = tab.inputBuffer;
         if (tab.historyIndex > 0) { tab.historyIndex--; tab.inputBuffer = tab.history[tab.historyIndex]; }
       } else if (key === "ArrowDown") {
-        if (tab.awaitingPassword || tab.pendingConfirm) return;
+        if (tab.awaitingPassword || tab.inputRequest) return;
         tab.completion = null;
         if (tab.historyIndex < tab.history.length - 1) { tab.historyIndex++; tab.inputBuffer = tab.history[tab.historyIndex]; }
         else if (tab.historyIndex === tab.history.length - 1) { tab.historyIndex = tab.history.length; tab.inputBuffer = tab.historyDraft || ""; }
@@ -790,70 +805,112 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       } catch (error) {}
     }
 
-    // Runs one asynchronous step of a command. Keys are ignored while it runs, errors
-    // are printed, and a fresh prompt follows unless the step opened its own prompt
-    // (password, yes/no question, nano, dmgr) by returning KEEP_PROMPT.
-    async function runTask(tab, task, label = "") {
+    // Runs a command line (or the startup file) through the tab's shell. Keys are
+    // ignored while it runs, except Ctrl+C which interrupts it; a command that needs an
+    // answer (password, yes/no, read) opens an input line with promptInput(). A fresh
+    // prompt follows unless the command closed the tab or is leaving the desktop.
+    async function runTask(tab, task) {
       tab.busy = true;
+      tab.interrupted = false;
+      tab.keepPrompt = false;
+      tab.runId++;
       if (tab.currentCursor) tab.currentCursor.style.display = "none";
-      let result;
       try {
-        result = await task();
+        await task();
       } catch (error) {
-        const message = error && error.message ? error.message : String(error);
-        printError(tab, label ? `${label}: ${message}` : message);
+        if (error instanceof MWShell.ShellSyntaxError) { printError(tab, `mwsh: ${error.message}`); tab.shell.status = 2; }
+        else if (error instanceof MWShell.Interrupt) tab.shell.status = 130;
+        else if (!(error instanceof MWShell.ExitSignal)) {
+          printError(tab, error && error.message ? error.message : String(error));
+        }
       }
+      tab.io = null;
       tab.busy = false;
-      if (result !== KEEP_PROMPT) newPrompt(tab);
+      tab.inputRequest = null;
+      tab.awaitingPassword = false;
+      tab.interruptHandlers.clear();
+      if (!tab.keepPrompt && tabs.includes(tab)) newPrompt(tab);
     }
 
     function submitLine(tab) {
       tab.completion = null;
       if (tab.currentPrediction) tab.currentPrediction.textContent = "";
-      if (tab.awaitingPassword) { verifyPassword(tab); return; }
-      const line = tab.inputBuffer.trim();
-      if (tab.pendingConfirm) {
-        const { callback, label } = tab.pendingConfirm;
-        tab.pendingConfirm = null;
-        runTask(tab, () => callback(line.toLowerCase()), label);
+      // The answer to a question a running command asked.
+      if (tab.inputRequest) {
+        const request = tab.inputRequest;
+        const value = request.secret ? tab.passwordBuffer : tab.inputBuffer;
+        tab.inputRequest = null;
+        tab.awaitingPassword = false;
+        tab.passwordBuffer = "";
+        tab.busy = true;
+        if (tab.currentCursor) tab.currentCursor.style.display = "none";
+        request.resolve(value);
         return;
       }
-      if (!line) { newPrompt(tab); return; }
-      pushHistory(tab, line);
-      runTask(tab, () => executeCommand(line, tab));
+      const source = tab.pendingSource ? `${tab.pendingSource}\n${tab.inputBuffer}` : tab.inputBuffer;
+      if (!source.trim()) { tab.pendingSource = ""; newPrompt(tab); return; }
+      // An unfinished command (open quote, if without fi, trailing |...) continues on
+      // the next line, behind a "> " prompt.
+      try { MWShell.parse(source); } catch (error) {
+        if (error instanceof MWShell.ShellSyntaxError && error.incomplete) {
+          tab.pendingSource = source;
+          newPrompt(tab, `<span class="color-gray">&gt;&nbsp;</span>`);
+          return;
+        }
+      }
+      tab.pendingSource = "";
+      pushHistory(tab, source.trim());
+      runTask(tab, () => tab.shell.run(source));
     }
 
-    function verifyPassword(tab) {
-      const password = tab.passwordBuffer;
-      const callback = tab.authCallback;
-      const label = tab.authLabel;
-      tab.passwordBuffer = "";
-      tab.awaitingPassword = false;
-      tab.authCallback = null;
-      runTask(tab, async () => {
-        let data = {};
-        try {
-          const response = await fetch("/api/system/verify-password", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password })
-          });
-          data = await response.json();
-        } catch (error) {}
-        if (!data.success) { printError(tab, mariowOSI18n.t("terminal.auth.failure", "su: Authentication failure")); return; }
-        return callback ? callback() : undefined;
-      }, label);
-    }
-
+    // Ctrl+C: stops the running command, refuses a pending question, or drops the line.
     function cancelLine(tab) {
-      if (tab.busy || !tab.currentInput) return;
+      if (tab.busy) { interruptTab(tab); return; }
+      if (!tab.currentInput) return;
       tab.currentInput.textContent = `${tab.awaitingPassword ? "" : tab.inputBuffer}^C`;
       tab.awaitingPassword = false;
-      tab.authCallback = null;
-      tab.pendingConfirm = null;
+      tab.passwordBuffer = "";
       tab.completion = null;
+      tab.pendingSource = "";
       tab.historyIndex = tab.history.length;
       if (tab.currentPrediction) tab.currentPrediction.textContent = "";
+      if (tab.inputRequest) {
+        const request = tab.inputRequest;
+        tab.inputRequest = null;
+        tab.busy = true;
+        tab.interrupted = true;
+        if (tab.currentCursor) tab.currentCursor.style.display = "none";
+        request.reject(new MWShell.Interrupt());
+        return;
+      }
       newPrompt(tab);
+    }
+
+    function interruptTab(tab) {
+      if (tab.interrupted) return;
+      tab.interrupted = true;
+      screenLine(tab, "^C", "color-gray");
+      tab.interruptHandlers.forEach(handler => { try { handler(); } catch (error) {} });
+    }
+    // Lets a long command (curl, sleep, telnet...) stop when Ctrl+C is pressed.
+    function onInterrupt(tab, handler) {
+      tab.interruptHandlers.add(handler);
+      return () => tab.interruptHandlers.delete(handler);
+    }
+    function checkInterrupt(tab) {
+      if (tab.interrupted) throw new MWShell.Interrupt();
+    }
+
+    // Asks the user for a line of input while a command runs; resolves with the text.
+    function promptInput(tab, prefixHtml, { secret = false } = {}) {
+      checkInterrupt(tab);
+      return new Promise((resolve, reject) => {
+        tab.inputRequest = { resolve, reject, secret };
+        tab.awaitingPassword = secret;
+        newPrompt(tab, prefixHtml);
+        tab.busy = false;
+        focusTerminal();
+      });
     }
 
     function clearScreen(tab) {
@@ -1035,17 +1092,35 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
     }
 
-    function printLine(tab, text, className = "") {
+    // Output goes to the screen, or, inside a pipe, a redirection or $(...), into the
+    // running command's frame (tab.io) as plain text lines. Errors stay on the screen
+    // unless they are redirected (2>, 2>&1, &>).
+    const detached = () => document.createElement("div");
+    function isCapturing(tab) { return !!(tab.io && tab.io.out); }
+
+    function screenLine(tab, text, className = "") {
       const line = document.createElement("div");
       if (className) line.className = className;
       line.style.whiteSpace = "pre-wrap";
-      line.textContent = text;
+      if (text === "") line.appendChild(document.createElement("br"));
+      else line.textContent = text;
       tab.element.appendChild(line);
       tab.element.scrollTop = tab.element.scrollHeight;
       return line;
     }
 
+    function printLine(tab, text, className = "") {
+      if (isCapturing(tab)) { tab.io.out.push(String(text)); tab.io.noNewline = false; return detached(); }
+      return screenLine(tab, String(text), className);
+    }
+
     function printHTML(tab, html) {
+      if (isCapturing(tab)) {
+        const scratch = detached();
+        scratch.innerHTML = html;
+        tab.io.out.push(scratch.textContent);
+        return scratch;
+      }
       const block = document.createElement("div");
       block.style.whiteSpace = "pre-wrap";
       block.innerHTML = html;
@@ -1054,9 +1129,28 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       return block;
     }
 
-    function printError(tab, message) { return printLine(tab, message, "color-red"); }
+    function printError(tab, message) {
+      const io = tab.io;
+      if (io) {
+        if (io.err === "null") return detached();
+        if (Array.isArray(io.err)) { io.err.push(String(message)); return detached(); }
+        if (io.err === "out" && io.out) { io.out.push(String(message)); return detached(); }
+      }
+      return screenLine(tab, String(message), "color-red");
+    }
+
+    // What was piped or redirected into the running command (consumed), or null.
+    function readStdin(tab) {
+      const io = tab.io;
+      if (!io || !io.stdin) return null;
+      const text = io.stdin.text;
+      io.stdin.text = "";
+      return text;
+    }
 
     function printTable(tab, title, headers, rows) {
+      // Piped: one tab-separated line per row, ready for grep, cut, sort...
+      if (isCapturing(tab)) { rows.forEach(row => tab.io.out.push(row.join("\t"))); return detached(); }
       const head = `<tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
       const body = rows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
       return printHTML(tab, `${title ? `<div class="color-blue" style="margin-bottom: 8px;">${escapeHtml(title)}</div>` : ""}<table class="term-table">${head}${body}</table>`);
@@ -1065,7 +1159,8 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     // Animated "working" line for slow backend calls; returns a stop function.
     function startSpinner(tab, label) {
       const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-      const line = printLine(tab, `${frames[0]} ${label}`, "color-blue");
+      if (tab.io && tab.io.err === "null") return () => {};
+      const line = screenLine(tab, `${frames[0]} ${label}`, "color-blue");
       let frame = 0;
       const timer = setInterval(() => { frame = (frame + 1) % frames.length; line.textContent = `${frames[frame]} ${label}`; }, 90);
       return () => { clearInterval(timer); line.remove(); };
@@ -1133,25 +1228,90 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     }
 
     async function listDirectory(tab, args) {
-      const flags = args.slice(1).filter(arg => /^-[a-z]+$/i.test(arg)).join("");
-      const targets = args.slice(1).filter(arg => !/^-[a-z]+$/i.test(arg));
-      if (targets.length > 1 || /[^la]/i.test(flags.replace(/-/g, ""))) throw usageError("ls");
+      const flags = args.slice(1).filter(arg => /^-[a-z1]+$/i.test(arg)).join("");
+      const targets = args.slice(1).filter(arg => !/^-[a-z1]+$/i.test(arg));
+      if (/[^la1]/i.test(flags.replace(/-/g, ""))) throw usageError("ls");
       const long = flags.includes("l");
       const showHidden = flags.includes("a");
-      const directoryPath = targets[0] ? normalizeVirtualPath(targets[0], tab.currentDirectory) : tab.currentDirectory;
-      const data = await getDirectoryContents(directoryPath);
-      const items = data.contents.filter(item => showHidden || !item.name.startsWith("."));
-      if (!items.length) return;
+      // Piped or with -1: one name per line, the way scripts expect it.
+      const onePerLine = flags.includes("1") || isCapturing(tab);
       const nameHtml = item => item.type === "folder"
         ? `<span class="color-blue">${escapeHtml(item.name)}/</span>`
         : escapeHtml(item.name);
-      if (long) {
-        printHTML(tab, items.map(item =>
-          `${item.type === "folder" ? "d" : "-"}  ${escapeHtml(String(item.size || "--").padStart(9))}  ${escapeHtml(String(item.date || "--").padEnd(10))}  ${nameHtml(item)}`
-        ).join("\n"));
-      } else {
-        printHTML(tab, items.map(nameHtml).join("    "));
+      const render = items => {
+        if (!items.length) return;
+        if (long) {
+          printHTML(tab, items.map(item =>
+            `${item.type === "folder" ? "d" : "-"}  ${escapeHtml(String(item.size || "--").padStart(9))}  ${escapeHtml(String(item.date || "--").padEnd(10))}  ${nameHtml(item)}`
+          ).join("\n"));
+        } else if (onePerLine) {
+          items.forEach(item => printLine(tab, item.name));
+        } else {
+          printHTML(tab, items.map(nameHtml).join("    "));
+        }
+      };
+      const files = [], folders = [];
+      let status = 0;
+      for (const target of (targets.length ? targets : ["."])) {
+        const targetPath = normalizeVirtualPath(target, tab.currentDirectory);
+        const info = await statPath(targetPath);
+        if (!info) { printError(tab, `ls: ${target}: ${mariowOSI18n.t("terminal.error.no-such-file-short", "No such file or directory")}`); status = 2; continue; }
+        if (info.type === "folder") folders.push({ target, targetPath });
+        else files.push({ ...info, name: target });
       }
+      render(files);
+      for (let k = 0; k < folders.length; k++) {
+        const data = await getDirectoryContents(folders[k].targetPath);
+        if (targets.length > 1) printLine(tab, `${files.length || k ? "\n" : ""}${folders[k].target}:`);
+        render(data.contents.filter(item => showHidden || !item.name.startsWith(".")));
+      }
+      return status;
+    }
+
+    // Reads a text file anywhere in the home partition (redirections, scripts, cat...).
+    async function readHomeFile(tab, requestedPath) {
+      const targetPath = normalizeVirtualPath(requestedPath, tab.currentDirectory);
+      if (targetPath === "/dev/null") return "";
+      if (targetPath !== "/home" && !targetPath.startsWith("/home/")) throw new Error(`${requestedPath}: ${mariowOSI18n.t("terminal.error.home-only-read", "only files in your home partition can be read")}`);
+      const target = splitHomeTarget(targetPath);
+      if (!target) throw new Error(`${requestedPath}: ${mariowOSI18n.t("terminal.error.is-a-directory", "Is a directory")}`);
+      const response = await fetch(`/api/system/files/content?path=${encodeURIComponent(target.parentPath)}&name=${encodeURIComponent(target.name)}`, { cache: "no-store" });
+      let data = {};
+      try { data = await response.json(); } catch (error) {}
+      if (response.status === 404) throw new Error(`${requestedPath}: ${mariowOSI18n.t("terminal.error.no-such-file-short", "No such file or directory")}`);
+      if (data.error === "Target is a directory") throw new Error(`${requestedPath}: ${mariowOSI18n.t("terminal.error.is-a-directory", "Is a directory")}`);
+      if (!response.ok || !data.success) throw new Error(`${requestedPath}: ${data.error || mariowOSI18n.t("terminal.error.read-file", "Unable to read file")}`);
+      return data.content || "";
+    }
+
+    async function writeHomeFile(tab, requestedPath, text, append = false) {
+      const targetPath = normalizeVirtualPath(requestedPath, tab.currentDirectory);
+      if (targetPath === "/dev/null") return;
+      const target = splitHomeTarget(targetPath);
+      if (!target) throw new Error(mariowOSI18n.t("terminal.error.home-is-directory", "/home is a directory"));
+      let content = text;
+      if (append) {
+        try { content = (await readHomeFile(tab, targetPath)) + text; }
+        catch (error) { if (await statPath(targetPath)) throw error; }
+      }
+      await api("/api/system/files/content", { path: target.parentPath, name: target.name, content });
+    }
+
+    // Text from the files named, or from stdin when there are none (or "-").
+    async function inputText(tab, files, commandName) {
+      if (!files.length || (files.length === 1 && files[0] === "-")) {
+        const text = readStdin(tab);
+        if (text === null) throw new Error(mariowOSI18n.t("terminal.error.no-input", "no input: name a file or pipe text into it (e.g. ls | {name})", { name: commandName }));
+        return text;
+      }
+      let text = "";
+      for (const file of files) text += file === "-" ? (readStdin(tab) || "") : await readHomeFile(tab, file);
+      return text;
+    }
+    function textLines(text) {
+      const lines = String(text).split(/\r?\n/);
+      if (lines.length && lines[lines.length - 1] === "") lines.pop();
+      return lines;
     }
 
     async function makeDirectory(tab, requestedPath, parents) {
@@ -1190,13 +1350,20 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       printLine(tab, mariowOSI18n.t("terminal.files.removed", "Removed: {path}", { path: targetPath }), "color-green");
     }
 
-    async function catFile(tab, requestedPath) {
-      const targetPath = normalizeVirtualPath(requestedPath, tab.currentDirectory);
-      if (targetPath !== "/home" && !targetPath.startsWith("/home/")) throw new Error(mariowOSI18n.t("terminal.error.home-only-read", "only files in your home partition can be read"));
-      const target = splitHomeTarget(targetPath);
-      if (!target) throw new Error(mariowOSI18n.t("terminal.error.home-is-directory", "/home is a directory"));
-      const data = await api(`/api/system/files/content?path=${encodeURIComponent(target.parentPath)}&name=${encodeURIComponent(target.name)}`);
-      if (data.content) printLine(tab, data.content);
+    async function catFile(tab, args) {
+      const number = args.includes("-n");
+      const files = args.slice(1).filter(arg => arg !== "-n");
+      const text = await inputText(tab, files, "cat");
+      if (!text) return;
+      if (number) {
+        const lines = textLines(text);
+        const width = String(lines.length).length;
+        lines.forEach((line, k) => printLine(tab, `${String(k + 1).padStart(Math.max(6, width))}  ${line}`));
+      } else if (isCapturing(tab)) {
+        textLines(text).forEach(line => printLine(tab, line));
+      } else {
+        printLine(tab, text.replace(/\r?\n$/, ""));
+      }
     }
 
     async function touchFile(tab, requestedPath) {
@@ -1295,6 +1462,8 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         updateNanoModified();
         nanoOverlay.style.display = "flex";
         nanoEditor.focus();
+        // Resolves when the editor is closed, so a script waits for it.
+        return new Promise(resolve => { nanoDone = resolve; });
       } catch (error) {
         nanoTarget = null;
         nanoOverlay.style.display = "none";
@@ -1451,7 +1620,9 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       nanoConfirmDiscard = false;
       nanoMode = "edit";
       nanoOverlay.style.display = "none";
-      newPrompt(tab);
+      const done = nanoDone;
+      nanoDone = null;
+      if (done) done(); else newPrompt(tab);
       focusTerminal();
     }
 
@@ -1598,10 +1769,12 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     function launchDmgr() { 
       dmgrActive = true; dmgrScreen = 1; focusIndex = 0; selectedDEIndex = 0;
       try { const parentUrl = window.parent.location.pathname; const currentFile = parentUrl.substring(parentUrl.lastIndexOf('/') + 1); if (currentFile) currentActiveDE = currentFile; } catch(e) {}
+      const finished = new Promise(resolve => { dmgrDone = resolve; });
       fetch("/api/system/desktops").then(res => res.json()).then(data => {
           availableDEs = data.desktops || ["com.mariowos.desktop.html"]; const foundIdx = availableDEs.indexOf(currentActiveDE); if(foundIdx !== -1) selectedDEIndex = foundIdx;
           dmgrOverlay.style.display = "flex"; document.getElementById("dmgr-screen1").style.display = "block"; document.getElementById("dmgr-screen2").style.display = "none"; renderDmgr1();
       }).catch(() => closeDmgr(mariowOSI18n.t("terminal.dmgr.read-failed", "E: Failed to read desktop environments.")));
+      return finished;
     }
     function renderDmgr1() {
       const listDiv = document.getElementById("dmgr-desktop-list"); listDiv.innerHTML = "";
@@ -1620,23 +1793,29 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       document.getElementById("dmgr-btn-yes").className = "dmgr-btn" + (confirmFocusIndex === 1 ? " focused" : "");
     }
     function closeDmgr(msg = mariowOSI18n.t("terminal.dmgr.cancelled", "dmgr: Operation cancelled.")) {
-      dmgrActive = false; dmgrOverlay.style.display = "none"; const tab = tabs.find(t => t.id === activeTabId); if(tab) { const out = document.createElement("div"); out.innerText = msg; tab.element.appendChild(out); newPrompt(tab); }
+      dmgrActive = false; dmgrOverlay.style.display = "none"; const tab = tabs.find(t => t.id === activeTabId);
+      if (tab) printLine(tab, msg);
+      const done = dmgrDone;
+      dmgrDone = null;
+      if (done) done(); else if (tab) newPrompt(tab);
       focusTerminal();
     }
 
     // --- PROMPTS: password and yes/no questions ---
-    function withAuth(tab, label, callback) {
-      tab.awaitingPassword = true;
-      tab.authCallback = callback;
-      tab.authLabel = label;
-      newPrompt(tab, `<span class="color-yellow">${escapeHtml(mariowOSI18n.t("terminal.auth.password-required", "Password required for system operation:"))} </span>`, true);
-      return KEEP_PROMPT;
+    // Asks for the account password before a system operation. Once it is given, the
+    // rest of the same command line (or script) does not ask again.
+    async function requireAuth(tab) {
+      if (tab.authRunId === tab.runId) return;
+      const password = await promptInput(tab, `<span class="color-yellow">${escapeHtml(mariowOSI18n.t("terminal.auth.password-required", "Password required for system operation:"))} </span>`, { secret: true });
+      let data = {};
+      try { data = await api("/api/system/verify-password", { password }); } catch (error) {}
+      if (!data.success) throw new Error(mariowOSI18n.t("terminal.auth.failure", "su: Authentication failure"));
+      tab.authRunId = tab.runId;
     }
 
-    function askConfirm(tab, label, question, callback) {
-      tab.pendingConfirm = { callback, label };
-      newPrompt(tab, `<span class="color-yellow">${escapeHtml(question)}</span>&nbsp;`);
-      return KEEP_PROMPT;
+    async function askYesNo(tab, question, defaultYes) {
+      const answer = await promptInput(tab, `<span class="color-yellow">${escapeHtml(question)}</span>&nbsp;`);
+      return isYes(answer.trim().toLowerCase(), defaultYes);
     }
 
     function isYes(answer, defaultYes) {
@@ -1693,16 +1872,26 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       printLine(tab, `✔ ${mariowOSI18n.t("terminal.get.installed", "{pkg} installed successfully.", { pkg: app.id })}`, "color-green");
       globalCatalog = [];
       if (app.id === "tiles") {
-        return askConfirm(tab, "get", mariowOSI18n.t("terminal.get.switch-tiles", "Do you want to switch to Tiles DE right now? [Y/n]"), answer => {
-          if (!isYes(answer, true)) { printLine(tab, mariowOSI18n.t("terminal.get.switch-cancelled", "Switch cancelled. You can use 'dmgr' to switch later.")); return; }
-          printLine(tab, mariowOSI18n.t("terminal.get.switching", "Switching DE immediately..."));
-          setTimeout(() => { window.parent.location.href = "/desktop/com.mariowos.twm.html"; }, 500);
-          return KEEP_PROMPT;
-        });
+        if (!(await askYesNo(tab, mariowOSI18n.t("terminal.get.switch-tiles", "Do you want to switch to Tiles DE right now? [Y/n]"), true))) {
+          printLine(tab, mariowOSI18n.t("terminal.get.switch-cancelled", "Switch cancelled. You can use 'dmgr' to switch later."));
+          return;
+        }
+        printLine(tab, mariowOSI18n.t("terminal.get.switching", "Switching DE immediately..."));
+        setTimeout(() => { window.parent.location.href = "/desktop/com.mariowos.twm.html"; }, 500);
+        tab.keepPrompt = true;
+        return;
       }
       if (IS_EMBEDDED) {
         window.parent.postMessage({ type: "app-installed-live", app: { appId: app.id, title: app.title, icon: app.icon, url: `apps/${app.id}/index.html` } }, window.location.origin);
       }
+    }
+
+    async function removeInstalledApp(tab, appId) {
+      const stop = startSpinner(tab, mariowOSI18n.t("terminal.get.removing", "Removing {pkg}...", { pkg: appId }));
+      try { await api("/api/store/uninstall", { appId }); } finally { stop(); }
+      printLine(tab, mariowOSI18n.t("terminal.get.removed", "{pkg} removed successfully.", { pkg: appId }), "color-green");
+      globalCatalog = [];
+      if (IS_EMBEDDED) window.parent.postMessage({ type: "app-uninstalled-live", appId }, window.location.origin);
     }
 
     const GET_SUBCOMMANDS = {
@@ -1757,7 +1946,8 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         if ((await installedApps().catch(() => [])).some(item => item.appId === packageId)) {
           printLine(tab, mariowOSI18n.t("terminal.get.reinstall", "{pkg} is already installed: it will be reinstalled.", { pkg: packageId }), "color-gray");
         }
-        return withAuth(tab, "get", () => executeInstall(app, tab));
+        await requireAuth(tab);
+        return executeInstall(app, tab);
       }
 
       if (subcommand === "remove") {
@@ -1769,12 +1959,8 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
             ? mariowOSI18n.t("terminal.get.not-installed-suggest", "package '{pkg}' is not installed. Did you mean '{suggestion}'?", { pkg: packageId, suggestion })
             : mariowOSI18n.t("terminal.get.not-installed", "package '{pkg}' is not installed", { pkg: packageId }));
         }
-        return withAuth(tab, "get", async () => {
-          const stop = startSpinner(tab, mariowOSI18n.t("terminal.get.removing", "Removing {pkg}...", { pkg: packageId }));
-          try { await api("/api/store/uninstall", { appId: packageId }); } finally { stop(); }
-          printLine(tab, mariowOSI18n.t("terminal.get.removed", "{pkg} removed successfully.", { pkg: packageId }), "color-green");
-          if (IS_EMBEDDED) window.parent.postMessage({ type: "app-uninstalled-live", appId: packageId }, window.location.origin);
-        });
+        await requireAuth(tab);
+        return removeInstalledApp(tab, packageId);
       }
 
       if (subcommand === "update") {
@@ -1793,17 +1979,18 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         const upgrades = data.upgrades || [];
         if (!upgrades.length) { printLine(tab, mariowOSI18n.t("terminal.get.up-to-date", "All packages are up to date."), "color-green"); return; }
         printTable(tab, mariowOSI18n.t("terminal.get.upgradable-title", "Upgradable Packages:"), [mariowOSI18n.t("terminal.table.package-id", "package ID"), mariowOSI18n.t("terminal.table.installed", "installed"), mariowOSI18n.t("terminal.table.available", "available")], upgrades.map(item => [item.appId, item.current, item.latest]));
-        return askConfirm(tab, "get", mariowOSI18n.t("terminal.get.upgrade-confirm", "Upgrade {count} package(s)? [Y/n]", { count: upgrades.length }), answer => {
-          if (!isYes(answer, true)) { printLine(tab, mariowOSI18n.t("terminal.get.upgrade-cancelled", "Upgrade cancelled.")); return; }
-          return withAuth(tab, "get", async () => {
-            const stopUpgrade = startSpinner(tab, mariowOSI18n.t("terminal.get.upgrading", "Upgrading packages..."));
-            let result;
-            try { result = await api("/api/store/do-upgrade", {}); } finally { stopUpgrade(); }
-            (result.updated || []).forEach(item => printLine(tab, `✔ ${item.appId} -> ${item.version}`, "color-green"));
-            printLine(tab, mariowOSI18n.t("terminal.get.upgraded", "{count} of {total} package(s) upgraded.", { count: result.count, total: upgrades.length }), result.count === upgrades.length ? "color-green" : "color-yellow");
-            if (result.count < upgrades.length) printLine(tab, mariowOSI18n.t("terminal.get.upgrade-git-only", "Only packages installed from a git repository can be upgraded in place; reinstall the others with 'get install'."), "color-gray");
-          });
-        });
+        if (!(await askYesNo(tab, mariowOSI18n.t("terminal.get.upgrade-confirm", "Upgrade {count} package(s)? [Y/n]", { count: upgrades.length }), true))) {
+          printLine(tab, mariowOSI18n.t("terminal.get.upgrade-cancelled", "Upgrade cancelled."));
+          return;
+        }
+        await requireAuth(tab);
+        const stopUpgrade = startSpinner(tab, mariowOSI18n.t("terminal.get.upgrading", "Upgrading packages..."));
+        let result;
+        try { result = await api("/api/store/do-upgrade", {}); } finally { stopUpgrade(); }
+        (result.updated || []).forEach(item => printLine(tab, `✔ ${item.appId} -> ${item.version}`, "color-green"));
+        printLine(tab, mariowOSI18n.t("terminal.get.upgraded", "{count} of {total} package(s) upgraded.", { count: result.count, total: upgrades.length }), result.count === upgrades.length ? "color-green" : "color-yellow");
+        if (result.count < upgrades.length) printLine(tab, mariowOSI18n.t("terminal.get.upgrade-git-only", "Only packages installed from a git repository can be upgraded in place; reinstall the others with 'get install'."), "color-gray");
+        return;
       }
 
       const suggestion = closestMatch(subcommand, Object.keys(GET_SUBCOMMANDS));
@@ -2005,9 +2192,12 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     }
 
     // --- HELP ---
-    const COMMAND_GROUPS = ["General", "Files", "System"];
+    const COMMAND_GROUPS = ["General", "Files", "Text", "Shell", "Network", "System"];
     function commandGroupTitle(group) {
       if (group === "Files") return mariowOSI18n.t("terminal.help.group.files", "Files Commands:");
+      if (group === "Text") return mariowOSI18n.t("terminal.help.group.text", "Text Commands (work with pipes):");
+      if (group === "Shell") return mariowOSI18n.t("terminal.help.group.shell", "Shell & Scripting Commands:");
+      if (group === "Network") return mariowOSI18n.t("terminal.help.group.network", "Network Commands:");
       if (group === "System") return mariowOSI18n.t("terminal.help.group.system", "System Commands:");
       return mariowOSI18n.t("terminal.help.group.general", "General Commands:");
     }
@@ -2015,6 +2205,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       return [mariowOSI18n.t("terminal.table.command", "command"), mariowOSI18n.t("terminal.table.description", "description")];
     }
     function showHelp(tab, name) {
+      if (name && HELP_TOPICS[name]) { HELP_TOPICS[name](tab); return; }
       if (name) {
         const command = COMMANDS[name];
         if (!command) {
@@ -2032,6 +2223,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         printTable(tab, commandGroupTitle(group), commandTableHeaders(), rows);
       });
       printLine(tab, mariowOSI18n.t("terminal.help.footer", "Tab completes commands, paths, packages and apps · ↑/↓ browse the history · → accepts the grey suggestion\nCtrl+C cancels the line · Ctrl+L clears the screen · Ctrl+T / Ctrl+W open / close a tab · 'help <command>' for details"), "color-gray");
+      printLine(tab, mariowOSI18n.t("terminal.help.footer-shell", "Pipes (|), redirections (> >> <), ; && ||, $variables and $(commands) all work · 'help mwex' explains .mwex scripts"), "color-gray");
     }
 
     // --- COMMANDS ---
@@ -2042,7 +2234,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
     const usageError = name => new Error(mariowOSI18n.t("terminal.error.usage", "usage: {usage}", { usage: COMMANDS[name].usage }));
     const COMMANDS = {
       help: { group: "General", usage: "help [command]", desc: mariowOSI18n.t("terminal.cmd.help", "Show every command, or details about one"),
-        complete: (tab, index) => index === 1 ? commandNames() : null,
+        complete: (tab, index) => index === 1 ? commandNames().concat(Object.keys(HELP_TOPICS)) : null,
         run: (tab, args) => showHelp(tab, args[1]) },
       about: { group: "General", usage: "about", desc: mariowOSI18n.t("terminal.cmd.about", "About this terminal and the installed mariowOS version"),
         run: async tab => {
@@ -2051,8 +2243,15 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
           printLine(tab, `mariowOS Terminal (preview) - (C) 2026 mariowstech and the mariowOS team${version}`);
         } },
       clear: { group: "General", usage: "clear", desc: mariowOSI18n.t("terminal.cmd.clear", "Clear the screen (Ctrl+L)"), run: tab => clearScreen(tab) },
-      echo: { group: "General", usage: "echo [text]", desc: mariowOSI18n.t("terminal.cmd.echo", "Print a message ($USER and $PWD are expanded)"),
-        run: (tab, args) => printLine(tab, args.slice(1).join(" ").replace(/\$USER\b/g, sysUsername).replace(/\$PWD\b/g, tab.currentDirectory)) },
+      echo: { group: "General", usage: "echo [-e] [text]", desc: mariowOSI18n.t("terminal.cmd.echo", "Print a message ($variables are expanded; -e turns \\n and \\t into new lines and tabs)"),
+        run: (tab, args) => {
+          let words = args.slice(1), escapes = false, newline = true;
+          while (words.length && /^-[neE]+$/.test(words[0])) { if (words[0].includes("e")) escapes = true; if (words[0].includes("n")) newline = false; words = words.slice(1); }
+          let text = words.join(" ");
+          if (escapes) text = text.replace(/\\(n|t|\\|e|a|r)/g, (m, c) => ({ n: "\n", t: "\t", "\\": "\\", e: "\x1b", a: "", r: "" })[c]);
+          if (isCapturing(tab)) { text.split("\n").forEach(line => printLine(tab, line)); if (!newline) tab.io.noNewline = true; }
+          else printLine(tab, text);
+        } },
       math: { group: "General", usage: "math <expression>", desc: mariowOSI18n.t("terminal.cmd.math", "Calculate an expression with + - * / % and parentheses"),
         run: (tab, args, line) => {
           const expression = line.replace(/^\S+\s*/, "").trim();
@@ -2092,8 +2291,8 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         run: (tab, args) => { if (args.length > 2) throw usageError("cd"); return changeDirectory(tab, args[1]); } },
       ls: { group: "Files", usage: "ls [-l] [-a] [directory]", desc: mariowOSI18n.t("terminal.cmd.ls", "List files and folders; -l shows size and date, -a hidden items"), complete: "dir",
         run: (tab, args) => listDirectory(tab, args) },
-      cat: { group: "Files", usage: "cat <file>", desc: mariowOSI18n.t("terminal.cmd.cat", "Print the content of a text file in your home partition"), complete: "any",
-        run: (tab, args) => { if (args.length !== 2) throw usageError("cat"); return catFile(tab, args[1]); } },
+      cat: { group: "Files", usage: "cat [-n] [file...]", desc: mariowOSI18n.t("terminal.cmd.cat", "Print text files (or what is piped in); -n numbers the lines"), complete: "any",
+        run: (tab, args) => catFile(tab, args) },
       touch: { group: "Files", usage: "touch <file>", desc: mariowOSI18n.t("terminal.cmd.touch", "Create an empty file in your home partition"), complete: "any",
         run: (tab, args) => { if (args.length !== 2) throw usageError("touch"); return touchFile(tab, args[1]); } },
       mkdir: { group: "Files", usage: "mkdir [-p] <directory>", desc: mariowOSI18n.t("terminal.cmd.mkdir", "Create a directory in your home partition; -p creates the missing parents"), complete: "dir",
@@ -2115,13 +2314,13 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       cp: { group: "Files", usage: "cp <source> <destination>", desc: mariowOSI18n.t("terminal.cmd.cp", "Copy a file or folder"), complete: "any",
         run: (tab, args) => { if (args.length !== 3) throw usageError("cp"); return transferPath(tab, "copy", args[1], args[2]); } },
       nano: { group: "Files", usage: "nano <file>", desc: mariowOSI18n.t("terminal.cmd.nano", "Edit a file in your home partition (Ctrl+S save, Ctrl+X exit, Ctrl+G help)"), complete: "any",
-        run: async (tab, args) => { if (args.length !== 2) throw usageError("nano"); await openNano(tab, args[1]); return KEEP_PROMPT; } },
+        run: async (tab, args) => { if (args.length !== 2) throw usageError("nano"); await openNano(tab, args[1]); } },
 
       open: { group: "System", usage: "open [app]", desc: mariowOSI18n.t("terminal.cmd.open", "Open a desktop app; without arguments lists the apps"),
         complete: async (tab, index) => index === 1 ? Object.keys(await availableApps()) : null,
         run: (tab, args) => { if (args.length > 2) throw usageError("open"); return openApp(tab, args[1]); } },
       dmgr: { group: "System", usage: "dmgr", desc: mariowOSI18n.t("terminal.cmd.dmgr", "Desktop Manager: switch the desktop environment (arrows, Enter, Esc)"),
-        run: () => { launchDmgr(); return KEEP_PROMPT; } },
+        run: () => launchDmgr() },
       get: { group: "System", usage: "get <command> [pkg]", desc: mariowOSI18n.t("terminal.cmd.get", "mariowOS package manager (list, search, install, remove, update, upgrade)"),
         complete: async (tab, index, args) => {
           if (index === 1) return Object.keys(GET_SUBCOMMANDS);
@@ -2134,7 +2333,7 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
         run: (tab, args) => {
           const key = args.slice(1).join(" ").trim();
           if (!key) throw usageError("addkey");
-          return withAuth(tab, "addkey", async () => { await api("/api/system/keyring", { key }); printLine(tab, mariowOSI18n.t("terminal.keyring.added", "Key added to the keyring."), "color-green"); });
+          return requireAuth(tab).then(async () => { await api("/api/system/keyring", { key }); printLine(tab, mariowOSI18n.t("terminal.keyring.added", "Key added to the keyring."), "color-green"); });
         } },
       delkey: { group: "System", usage: "delkey <key>", desc: mariowOSI18n.t("terminal.cmd.delkey", "Delete a key from the system keyring (requires password)"),
         complete: async (tab, index) => index === 1 ? (await api("/api/system/keyring")).keys.map(entry => entry.key) : null,
@@ -2143,7 +2342,9 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
           if (!key) throw usageError("delkey");
           const { keys } = await api("/api/system/keyring");
           if (!keys.some(entry => entry.key === key)) throw new Error(mariowOSI18n.t("terminal.keyring.not-found", "key not found in the keyring (see 'listkeys')"));
-          return withAuth(tab, "delkey", async () => { await api("/api/system/keyring/delete", { key }); printLine(tab, mariowOSI18n.t("terminal.keyring.deleted", "Key deleted from the keyring."), "color-green"); });
+          await requireAuth(tab);
+          await api("/api/system/keyring/delete", { key });
+          printLine(tab, mariowOSI18n.t("terminal.keyring.deleted", "Key deleted from the keyring."), "color-green");
         } },
       listkeys: { group: "System", usage: "listkeys", desc: mariowOSI18n.t("terminal.cmd.listkeys", "List the keys in the system keyring"),
         run: async tab => {
@@ -2155,17 +2356,27 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
 
     function commandNames() { return Object.keys(COMMANDS); }
 
-    async function unknownCommand(tab, name) {
+    // "command not found", with a hint. At the prompt (not in a script or a pipe) a
+    // command that is a Store package can be installed on the spot.
+    async function unknownCommand(tab, name, interactive) {
+      if (!interactive) {
+        const hint = closestMatch(name, commandNames());
+        printError(tab, `${mariowOSI18n.t("terminal.unknown.not-found", "{name}: command not found", { name })}${hint ? ` (${mariowOSI18n.t("terminal.unknown.did-you-mean", "Did you mean '{hint}'?", { hint })})` : ""}`);
+        return 127;
+      }
       let catalog = [];
       try { catalog = await loadCatalog(); } catch (error) {}
       const installed = await installedApps().catch(() => []);
       const pkg = catalog.find(app => app.id === name);
       if (pkg && !installed.some(app => app.appId === name)) {
         printHTML(tab, `<span class="color-red">${escapeHtml(mariowOSI18n.t("terminal.unknown.not-found-package", "{name}: command not found.", { name }))}</span>\n${mariowOSI18n.t("terminal.unknown.install-hint", 'You can install this package by running "{command}".', { command: `<span class="color-yellow">get</span> <span class="color-gray">install</span> ${escapeHtml(name)}` })}`);
-        return askConfirm(tab, "get", mariowOSI18n.t("terminal.unknown.install-confirm", "Do you want to install it now? [y/N]"), answer => {
-          if (!isYes(answer, false)) { printLine(tab, mariowOSI18n.t("terminal.unknown.install-cancelled", "Installation cancelled.")); return; }
-          return withAuth(tab, "get", () => executeInstall(pkg, tab));
-        });
+        if (!(await askYesNo(tab, mariowOSI18n.t("terminal.unknown.install-confirm", "Do you want to install it now? [y/N]"), false))) {
+          printLine(tab, mariowOSI18n.t("terminal.unknown.install-cancelled", "Installation cancelled."));
+          return 127;
+        }
+        await requireAuth(tab);
+        await executeInstall(pkg, tab);
+        return 0;
       }
       const apps = await availableApps();
       const lower = name.toLowerCase();
@@ -2175,19 +2386,118 @@ This project use open source and free fonts sourced from Google Fonts. Google Fo
       printHTML(tab, `<span class="color-red">${escapeHtml(mariowOSI18n.t("terminal.unknown.not-found", "{name}: command not found", { name }))}</span>` +
         (hint ? `\n${mariowOSI18n.t("terminal.unknown.did-you-mean", "Did you mean '{hint}'?", { hint: `<span class="color-yellow">${escapeHtml(hint)}</span>` })}` : "") +
         `\n${mariowOSI18n.t("terminal.unknown.type-help", "Type '{help}' to see all the commands.", { help: `<span class="color-yellow">help</span>` })}`);
+      return 127;
     }
 
-    async function executeCommand(line, tab) {
-      const args = parseCommandArguments(line);
-      const name = args[0];
+    // --- THE SHELL ---
+    // Each tab has its own shell (shell.js): it parses the line and runs builtins,
+    // functions and control flow; everything else lands in execExternal below.
+    function withFrame(tab, frame, fn) {
+      const previous = tab.io;
+      tab.io = frame;
+      try { return fn(); } finally { tab.io = previous; }
+    }
+
+    function createShell(tab) {
+      const host = {
+        cwd: () => tab.currentDirectory,
+        interrupted: () => tab.interrupted,
+        yield: () => new Promise(resolve => setTimeout(resolve, 0)),
+        closeShell: () => { tab.keepPrompt = true; closeTerminal(tab); },
+        write: (frame, text) => withFrame(tab, frame, () => printLine(tab, text)),
+        error: (frame, text) => withFrame(tab, frame, () => printError(tab, text)),
+        readFile: virtualPath => readHomeFile(tab, virtualPath),
+        writeFile: (virtualPath, text, append) => writeHomeFile(tab, virtualPath, text, append),
+        stat: virtualPath => statPath(normalizeVirtualPath(virtualPath, tab.currentDirectory)),
+        glob: pattern => globPaths(tab, pattern),
+        readLine: (prompt, { secret = false } = {}) => promptInput(tab, prompt ? `<span>${escapeHtml(prompt)}</span>` : "", { secret }),
+        which: async (name, shell) => {
+          if (Object.prototype.hasOwnProperty.call(COMMANDS, name) && COMMANDS[name].run) return { kind: "command" };
+          const script = await findScript(tab, name, shell);
+          return script ? { kind: "script", path: script } : null;
+        },
+        exec: (argv, frame, shell) => execExternal(tab, argv, frame, shell)
+      };
+      return new MWShell.Shell(host, {
+        interactive: true,
+        name: "mwsh",
+        env: { USER: sysUsername, HOME: "/home", PATH: "/home/bin", SHELL: "/bin/mwsh", TERM: "mariowos", HOSTNAME: "mariowos", LANG: mariowOSI18n.locale || "en" }
+      });
+    }
+
+    async function execExternal(tab, argv, frame, shell) {
+      const name = argv[0];
+      // A path runs a script: ./build.mwex, ~/bin/backup.mwex...
+      if (name.includes("/")) {
+        const scriptPath = normalizeVirtualPath(name, tab.currentDirectory);
+        const info = await statPath(scriptPath);
+        if (!info) throw Object.assign(new Error(mariowOSI18n.t("terminal.error.no-such-file-short", "No such file or directory")), { status: 127 });
+        if (info.type === "folder") throw Object.assign(new Error(mariowOSI18n.t("terminal.error.is-a-directory", "Is a directory")), { status: 126 });
+        if (!/\.mwex$/i.test(scriptPath)) throw Object.assign(new Error(mariowOSI18n.t("terminal.error.not-executable", "Permission denied: only .mwex files can be run (use 'sh {name}' to run it as a script)", { name })), { status: 126 });
+        return shell.runScript(await readHomeFile(tab, scriptPath), argv.slice(1), name, frame);
+      }
       const command = Object.prototype.hasOwnProperty.call(COMMANDS, name) ? COMMANDS[name] : null;
-      if (!command) return unknownCommand(tab, name);
-      try {
-        return await command.run(tab, args, line);
-      } catch (error) {
-        throw new Error(`${name}: ${error && error.message ? error.message : error}`);
+      if (command && command.run) {
+        const previous = tab.io;
+        tab.io = frame;
+        try {
+          const result = await command.run(tab, argv, argv.join(" "));
+          if (result === KEEP_PROMPT) tab.keepPrompt = true;
+          return typeof result === "number" ? result : 0;
+        } finally {
+          tab.io = previous;
+        }
+      }
+      // A .mwex script in one of the $PATH folders (~/bin by default) runs by name.
+      const script = await findScript(tab, name, shell);
+      if (script) return shell.runScript(await readHomeFile(tab, script), argv.slice(1), script, frame);
+      if (frame && frame.err === "null") return 127;
+      const interactive = shell.interactive && shell.depth === 0 && !frame.out && !frame.stdin;
+      return withFrame(tab, { stdin: null, out: null, err: frame ? frame.err : "screen" }, () => unknownCommand(tab, name, interactive));
+    }
+
+    async function findScript(tab, name, shell) {
+      if (!/^[\w.@+-]+$/.test(name)) return null;
+      const folders = String((shell && shell.getVar("PATH")) || "/home/bin").split(":").filter(Boolean);
+      for (const folder of folders) {
+        const directory = normalizeVirtualPath(folder, tab.currentDirectory);
+        let data;
+        try { data = await getDirectoryContents(directory); } catch (error) { continue; }
+        const file = data.contents.find(item => item.type !== "folder" && (item.name === `${name}.mwex` || (item.name === name && /\.mwex$/i.test(name))));
+        if (file) return `${directory === "/" ? "" : directory}/${file.name}`;
+      }
+      return null;
+    }
+
+    // Expands a wildcard in the last part of a path: *.txt, ~/Projects/*.mwex, photo?.png
+    async function globPaths(tab, pattern) {
+      const slash = pattern.lastIndexOf("/");
+      const folderPart = slash >= 0 ? pattern.slice(0, slash + 1) : "";
+      const namePattern = pattern.slice(slash + 1);
+      if (!namePattern || /(^|[^\\])[*?[]/.test(folderPart)) return [];
+      const folder = folderPart.replace(/\\(.)/g, "$1");
+      let data;
+      try { data = await getDirectoryContents(normalizeVirtualPath(folder || ".", tab.currentDirectory)); } catch (error) { return []; }
+      const matcher = MWShell.globToRegExp(namePattern);
+      return data.contents
+        .filter(item => (namePattern.startsWith(".") || !item.name.startsWith(".")) && matcher.test(item.name))
+        .map(item => folder + item.name)
+        .sort((a, b) => a.localeCompare(b));
+    }
+
+    // ~/.mwshrc runs when a tab opens: the place for aliases, functions and variables.
+    async function loadStartupFile(tab) {
+      let home;
+      try { home = await getDirectoryContents("/home"); } catch (error) { return; }
+      if (!home.contents.some(item => item.name === ".mwshrc" && item.type !== "folder")) return;
+      const source = await readHomeFile(tab, "/home/.mwshrc");
+      try { await tab.shell.run(source); }
+      catch (error) {
+        if (error instanceof MWShell.ShellSyntaxError) printError(tab, `.mwshrc: line ${error.line || 1}: ${error.message}`);
+        else throw error;
       }
     }
   </script>
+  <script src="commands.js"></script>
 </body>
 </html>
